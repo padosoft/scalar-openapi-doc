@@ -59,6 +59,8 @@ jobs:
         run: php artisan test
 
   # Frontend: TypeScript type-check, Vitest unit tests, and production build.
+  # Needs PHP because tsc resolves the @/routes and @/actions modules that
+  # Wayfinder generates from the Laravel route/controller definitions.
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -67,13 +69,31 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '22'
 
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
       - name: Install Node dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Prepare app
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Generate Wayfinder routes/actions
+        run: php artisan wayfinder:generate --with-form
 
       - name: Type-check (tsc)
         run: npm run types:check
