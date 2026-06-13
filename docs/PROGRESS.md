@@ -7,8 +7,8 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | # | Macro task | Branch | Status | Macro PR |
 |---|---|---|---|---|
 | T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟢 merged (PR #3 → `main`, `691db58`) | #3 |
-| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟡 macro PR pending → `main` (2.1+2.2+2.3 merged) | — |
-| T3 | RBAC & data model | `task/rbac-data-model` | ⚪ pending | — |
+| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟢 merged (PR #7 → `main`, `7738203`) | #7 |
+| T3 | RBAC & data model | `task/rbac-data-model` | 🟡 in progress (3.1 #9 + 3.2 #10 merged; 3.3 #11 in review) | — |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | ⚪ pending | — |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | ⚪ pending | — |
 | T6 | Admin users + grants | `task/admin-users` | ⚪ pending | — |
