@@ -23,7 +23,7 @@ The full plan (macro tasks, analysis findings B1–B9, ordering) is in **`docs/P
 
 ## The non-negotiable loop (summary — full version in AGENTS.md)
 
-Per subtask: write code + guardrails (Pest / Vitest / Playwright-if-UI) → local gates green (`pint --test`, `phpstan analyse --level=max`, `php artisan test`, `npm run test`, `npm run build`, `npx playwright test` if UI) → **local Copilot review, report-only**, diffing against the **PR base** (macro branch for subtasks; `origin/main` only for the macro PR), loop to zero comments → push → open PR → request Copilot review (`gh pr edit <PR> --add-reviewer copilot`; on failure use the GraphQL `requestReviewsByLogin` fallback in AGENTS.md) → wait for CI green **and** both bot reviewers (Copilot **and** Codex) → fix every real comment, re-review → merge → update `docs/PROGRESS.md` and `docs/LESSON.md`.
+Per subtask: write code + guardrails (Pest / Vitest / Playwright-if-UI) → local gates green (`vendor/bin/pint --test`, `vendor/bin/phpstan analyse --level=max`, `php artisan test`, `npm run test`, `npm run build`, `npx playwright test` if UI) → **local Copilot review, report-only**, diffing against the **PR base** (macro branch for subtasks; `origin/main` only for the macro PR), loop to zero comments → push → open PR → request Copilot review (`gh pr edit <PR> --add-reviewer copilot`; on failure use the GraphQL `requestReviewsByLogin` fallback in AGENTS.md) → wait for CI green **and** both bot reviewers (Copilot **and** Codex) → fix every real comment, re-review → merge → update `docs/PROGRESS.md` and `docs/LESSON.md`.
 
 ## Project-specific gotchas (see docs/LESSON.md for the full list)
 
