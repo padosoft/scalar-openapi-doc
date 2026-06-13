@@ -1,0 +1,53 @@
+{
+    "openapi": "3.1.0",
+    "info": { "title": "Webhooks & Security fixture", "version": "1.0.0" },
+    "security": [{ "ApiKeyAuth": [] }],
+    "tags": [
+        { "name": "Orders" },
+        { "name": "Webhooks" }
+    ],
+    "paths": {
+        "/secure": {
+            "get": {
+                "tags": ["Orders"],
+                "security": [{ "ApiKeyAuth": [] }],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "content": {
+                            "application/json": {
+                                "schema": { "$ref": "#/components/schemas/OrderEvent" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "webhooks": {
+        "newOrder": {
+            "post": {
+                "tags": ["Webhooks"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": { "$ref": "#/components/schemas/WebhookPayload" }
+                        }
+                    }
+                },
+                "responses": { "200": { "description": "ack" } }
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-Api-Key" },
+            "UnusedAuth": { "type": "http", "scheme": "bearer" }
+        },
+        "schemas": {
+            "OrderEvent": { "type": "object", "properties": { "id": { "type": "integer" } } },
+            "WebhookPayload": { "type": "object", "properties": { "event": { "type": "string" } } },
+            "Orphan": { "type": "object" }
+        }
+    }
+}

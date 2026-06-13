@@ -55,6 +55,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Upstream URL allow-list (SSRF guard)
+    |--------------------------------------------------------------------------
+    |
+    | Before any fetch, the upstream URL is validated against these. Only the
+    | listed schemes are allowed (https by default — add http only if you must),
+    | and if `allowed_hosts` is non-empty the URL host must be one of them. Empty
+    | host list = only the host of `upstream_url` is implicitly trusted.
+    |
+    */
+
+    'allowed_schemes' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('OPENAPI_ALLOWED_SCHEMES', 'https'))
+    ))),
+
+    'allowed_hosts' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('OPENAPI_ALLOWED_HOSTS', ''))
+    ))),
+
+    /*
+    |--------------------------------------------------------------------------
     | Cache (Redis in production; driver-agnostic via the Cache facade)
     |--------------------------------------------------------------------------
     |
