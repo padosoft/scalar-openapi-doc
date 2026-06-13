@@ -652,9 +652,13 @@ final class OpenApiSpecService
     /**
      * Resolves a path-item Reference Object ({"$ref": "#/components/pathItems/X"},
      * OpenAPI 3.1 reuse) to the referenced path item, so its operations can be
-     * filtered and enumerated. Sibling keys take precedence over the target; an
-     * unresolvable ref is returned unchanged (and later dropped for lacking any
-     * verb). Single-level resolution (a referenced item is not itself re-resolved).
+     * filtered and enumerated. Sibling keys take precedence over the target.
+     *
+     * The whole `$ref` chain is followed (cycle-safe) and NO path-item `$ref`
+     * survives in the result: a nested/dangling/cyclic ref is dropped. This is
+     * essential — if a `#/components/pathItems/…` ref leaked into the filtered
+     * output, pruneComponents() would follow it and keep that entire (unfiltered)
+     * path item, exposing operations the user was never granted.
      *
      * @param  array<array-key, mixed>  $pathItemComponents
      * @return array<array-key, mixed>
@@ -662,15 +666,31 @@ final class OpenApiSpecService
     private function resolvePathItem(mixed $pathItem, array $pathItemComponents): array
     {
         $item = $this->asArray($pathItem);
-        $ref = $item['$ref'] ?? null;
         $prefix = '#/components/pathItems/';
+        $seen = [];
 
-        if (is_string($ref) && str_starts_with($ref, $prefix)) {
-            $target = $pathItemComponents[substr($ref, strlen($prefix))] ?? null;
-            if (is_array($target)) {
-                unset($item['$ref']);
-                $item += $target; // existing sibling keys win; target fills the rest
+        while (true) {
+            $ref = $item['$ref'] ?? null;
+            if (! is_string($ref) || ! str_starts_with($ref, $prefix)) {
+                break;
             }
+
+            // Always drop the ref; we either inline its target or discard a
+            // broken/cyclic one — never leave it for pruning to follow.
+            unset($item['$ref']);
+
+            $name = substr($ref, strlen($prefix));
+            if (isset($seen[$name])) {
+                break; // cycle
+            }
+            $seen[$name] = true;
+
+            $target = $pathItemComponents[$name] ?? null;
+            if (! is_array($target)) {
+                break; // unresolvable
+            }
+
+            $item += $target; // already-merged (closer) keys win; target fills gaps
         }
 
         return $item;

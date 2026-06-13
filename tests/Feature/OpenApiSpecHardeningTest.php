@@ -291,6 +291,39 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['paths']['/reused'])->toHaveKey('get');
     }
 
+    public function test_resolves_nested_path_item_refs_and_does_not_leak_via_pruning(): void
+    {
+        // A -> ($ref B) + granted GET; B holds an ungranted DELETE. A single-level
+        // resolve would leave a "$ref: B" in the output, which pruning then follows
+        // and keeps B whole — leaking the ungranted DELETE. The chained resolve
+        // must inline only the granted GET and retain no pathItems $ref.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['$ref' => '#/components/pathItems/A']],
+            'components' => [
+                'pathItems' => [
+                    'A' => [
+                        '$ref' => '#/components/pathItems/B',
+                        'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+                    ],
+                    'B' => [
+                        'delete' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]],
+                    ],
+                ],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/x'])
+            ->and($filtered['paths']['/x'])->toHaveKey('get')
+            ->and($filtered['paths']['/x'])->not->toHaveKey('delete')
+            ->and($filtered['paths']['/x'])->not->toHaveKey('$ref')
+            // Neither pathItems component (A/B) may survive: nothing references them.
+            ->and($filtered['components']['pathItems'] ?? [])->toBe([]);
+    }
+
     public function test_metadata_includes_referenced_path_item_operations(): void
     {
         $spec = $this->specWithPathItemRef();
