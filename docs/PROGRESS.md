@@ -52,6 +52,14 @@ Branch: `task/bootstrap-2-1-scaffold` → PR into `task/bootstrap`.
 - Scaffolding `laravel new ... --react --pest --database=mysql` into a temp sibling dir `C:\xampp\htdocs\scalar-openapi-doc-tmp`, then copying app files into the repo preserving `.git`, LICENSE, AGENTS.md, CLAUDE.md, docs/, .claude/, .gitattributes (starter README set aside; rewritten in T9).
 - `.env` dev target: MySQL via Herd (db `scalar_openapi_doc`), `CACHE_STORE=redis`.
 - Verify: `php artisan about` on Herd, `npm run build`, login page renders, starter Pest tests pass.
+- **Done:** scaffold committed `e36729b`, PR #4. Verified: artisan about (L13.15/PHP8.5/cache=redis/db=mysql), migrate OK, build OK, Pest 39/39, Pint clean, PHPStan L7 clean (needs `--memory-limit`).
+
+#### Bot review backlog from PR #4 (scaffold) — to action in later subtasks
+Bot findings on PR #4 mostly target **pristine starter-kit files** (out of scope for the faithful scaffold). Dispositions:
+- **T2.3 (CI):** starter CI (`.github/workflows/{lint,tests}.yml`) `pull_request.branches` allowlist is `develop/main/master/workos` only → subtask PRs into `task/**` get **no CI** (why PR #1–#4 had no checks). Add `task/**`. Also: lint workflow runs write-mode `format`/`lint` (should use `format:check`/`lint:check` to fail on violations) and has `contents: write` (drop to `contents: read`). **These are the reason the "CI green" gate has been vacuous so far.**
+- **T2.3 (PHPStan):** codify `--memory-limit` (default 128M crashes the parallel worker) and bump level 7 → max.
+- **T8 (security pass):** consider hardening pristine starter code if we keep it — `app/Http/Middleware/HandleAppearance.php` appearance cookie (validate against allowlist + JSON-encode in `app.blade.php` inline script); `passkey-register.tsx` reads `navigator` in render (SSR-unsafe if SSR enabled).
+- **Not-actionable / rejected:** `password-input.tsx` forwardRef — false positive under **React 19** (`ref` is a normal prop). `User.php` `MustVerifyEmail` — deliberately omitted: users are **admin-provisioned** (no self-registration), so email verification is not part of this product. `tests/Pest.php` placeholder helper — starter artifact, harmless; remove if it ever collides.
 
 ## T3 — task/rbac-data-model
 _Not started._
