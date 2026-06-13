@@ -50,10 +50,11 @@ Definition of Done for every subtask:
    ```
 3. Local Copilot review loop — zero comments required before push. **Diff against the PR base, not always `origin/main`:** for a subtask branch the base is the macro branch (`origin/task/<macro-name>`); only the macro PR diffs against `origin/main`. This keeps the review focused on the changes this PR actually introduces.
    ```
-   # subtask branch (base = macro branch):
-   git diff origin/task/<macro-name>...HEAD > $env:TEMP\pr-diff.txt
+   # subtask branch (base = macro branch). Write UTF-8 explicitly — bare `>` is
+   # UTF-16 under Windows PowerShell 5.1, which the review tool can't read:
+   git diff origin/task/<macro-name>...HEAD | Out-File -Encoding utf8 $env:TEMP\pr-diff.txt
    # macro branch PR (base = main):
-   # git diff origin/main...HEAD > $env:TEMP\pr-diff.txt
+   # git diff origin/main...HEAD | Out-File -Encoding utf8 $env:TEMP\pr-diff.txt
    copilot --autopilot --yolo -p "/review Review the attached diff (branch vs PR base) at $env:TEMP\pr-diff.txt. DO NOT modify or commit any files - report findings only. Reply 'NO FINDINGS' if clean."
    ```
    Pass the **full branch diff vs the PR base** (not just unstaged files). The review prompt MUST say "report findings only": `--autopilot --yolo` grants all tools and *will edit and commit files* otherwise (see `docs/LESSON.md`). If a finding is real, you apply the fix yourself and re-review; never let the review tool mutate the branch behind the gate. Fix every finding, re-run gates, re-review, until the review returns zero actionable comments.
