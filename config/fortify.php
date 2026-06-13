@@ -163,7 +163,8 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Self-registration is intentionally disabled: users are provisioned by
+        // an admin (RBAC model). Do NOT add Features::registration() back.
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([

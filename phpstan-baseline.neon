@@ -87,7 +87,7 @@ parameters:
 		-
 			message: '#^Cannot call method toPasswordRulesString\(\) on Illuminate\\Validation\\Rules\\Password\|null\.$#'
 			identifier: method.nonObject
-			count: 2
+			count: 1
 			path: app/Providers/FortifyServiceProvider.php
 
 		-

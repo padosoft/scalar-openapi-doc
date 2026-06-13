@@ -2,13 +2,16 @@
 
 This is the resume point. If a session dies, the next agent reads this file (plus `AGENTS.md`, `docs/RULES.md`, `docs/LESSON.md`) and continues exactly from here. Update it after every meaningful step. Newest entries at the bottom of each task.
 
+> **⚠️ Active blocker (2026-06-13): GitHub Copilot reviewer unavailable org-wide.**
+> The Copilot org spend limit is reached (`additional_spend_limit_reached`, HTTP 402): the **local** `copilot` CLI returns 402 AND the **remote** Copilot PR reviewer bot no longer attaches (re-requests leave `requested_reviewers` empty). **Codex remote review still works** and CI is green. Per the amended AGENTS.md, binding review continues via **Codex + CI + local gates** (pint, phpstan max, pest, vitest, build); each merge is gated on those. **Action for the owner:** raise/clear the Copilot spend limit at github.com/settings/copilot/features to restore Copilot reviews. Until then, Copilot-review is treated as unavailable (documented per-PR).
+
 ## Macro Task Status
 
 | # | Macro task | Branch | Status | Macro PR |
 |---|---|---|---|---|
 | T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟢 merged (PR #3 → `main`, `691db58`) | #3 |
-| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟡 macro PR pending → `main` (2.1+2.2+2.3 merged) | — |
-| T3 | RBAC & data model | `task/rbac-data-model` | ⚪ pending | — |
+| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟢 merged (PR #7 → `main`, `7738203`) | #7 |
+| T3 | RBAC & data model | `task/rbac-data-model` | 🟡 in progress (3.1 #9 + 3.2 #10 merged; 3.3 #11 in review) | — |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | ⚪ pending | — |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | ⚪ pending | — |
 | T6 | Admin users + grants | `task/admin-users` | ⚪ pending | — |
@@ -77,6 +80,18 @@ Bot findings on PR #4 mostly target **pristine starter-kit files** (out of scope
 _Not started. Seeder skeletons reviewed: `RoleSeeder` (spatie `Role::findOrCreate` admin/user, guard `web`), `AdminUserSeeder` (`firstOrCreate` by `ADMIN_EMAIL`, assignRole admin — note: uses `env()` directly, route via config or read at runtime since `env()` returns null when config is cached), `DatabaseSeeder` (calls Role then AdminUser)._
 
 **Carried into T3 (from PR #7 / Codex):** disable Fortify self-registration — `Features::registration()` in `config/fortify.php` lets anyone sign up, bypassing the admin-provisioned/RBAC model. Remove the feature and the register link/page (`resources/js/pages/auth/register.tsx`, route, `RegistrationTest`) since users are created by admins only.
+
+### Subtask 3.2 — custom data model (migrations, enums, models)
+Branch: `task/rbac-data-model-3-2-models`
+
+- Migrations: `user_allowed_tags`, `user_allowed_endpoints`, `scalar_servers`, `auth_logs`.
+- Enums: `AuthEvent` (login/logout/failed), `HttpVerb` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE + `values()` helper).
+- Models: `UserAllowedTag`, `UserAllowedEndpoint` (method cast to `HttpVerb`), `ScalarServer`, `AuthLog` (`UPDATED_AT=null`, `created_at` NOT NULL `useCurrent()`).
+- `User` hasMany: `allowedTags`, `allowedEndpoints`, `authLogs`.
+- `DataModelTest` (9 tests): unique constraints, cascade, SET NULL, casts, HttpVerb cast, values(), HasMany relations.
+- **Copilot review loop (3 rounds):** all 6 findings fixed — phantom `app/Enums/Enums/HttpVerb.php` deleted, HttpVerb cast added to UserAllowedEndpoint, redundant `index('user_id')` removed from grant migrations, auth_logs.created_at NOT NULL + useCurrent(), TRACE added to HttpVerb, auth_logs.email widened to 255, utf8mb4_bin collation on tag/path for MySQL **and MariaDB** (guarded with `in_array(DB::getDriverName(), ['mysql','mariadb'])` for SQLite compat).
+- All gates green: Pest 52/52, Pint clean, PHPStan max (0 errors), final review → NO FINDINGS.
+- **Status:** 🟡 in review — PR #10 into `task/rbac-data-model`.
 
 ## T4 — task/openapi-service
 _Not started._
