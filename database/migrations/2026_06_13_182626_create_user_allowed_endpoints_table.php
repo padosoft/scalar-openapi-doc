@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -15,8 +16,12 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             // Uppercase HTTP verb (GET/POST/...); identity of an operation is (method, path).
             $table->string('method', 10);
-            // OpenAPI path template, e.g. /orders/{id}.
-            $table->string('path', 255);
+            // On MySQL: binary collation so /Pets ≠ /pets (OpenAPI paths are case-sensitive).
+            // SQLite UNIQUE is binary by default; collation keyword not supported there.
+            $col = $table->string('path', 255);
+            if (DB::getDriverName() === 'mysql') {
+                $col->collation('utf8mb4_bin');
+            }
             $table->timestamps();
 
             $table->unique(['user_id', 'method', 'path']); // leading column covers user_id-only lookups

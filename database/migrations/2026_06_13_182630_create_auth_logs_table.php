@@ -14,8 +14,8 @@ return new class extends Migration
             $table->id();
             // SET NULL on user delete: the audit row must survive user deletion.
             $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
-            // Email snapshot, kept readable after the user is deleted.
-            $table->string('email', 191);
+            // Email snapshot: 255 chars matches users.email; kept readable after user deletion.
+            $table->string('email', 255);
             $table->string('event', 20); // login | logout | failed
             $table->string('ip_address', 45)->nullable(); // IPv6-capable
             $table->string('user_agent', 512)->nullable();
