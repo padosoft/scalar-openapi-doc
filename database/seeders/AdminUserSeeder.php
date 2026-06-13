@@ -23,9 +23,9 @@ final class AdminUserSeeder extends Seeder
     public function run(): void
     {
         $email = $this->stringConfig('openapi.admin_user.email');
-        // Trim so surrounding whitespace can't smuggle a default/empty password
-        // past the production guard (e.g. " change-me ").
-        $password = trim($this->stringConfig('openapi.admin_user.password', allowEmpty: true));
+        // Whitespace can't smuggle a default/empty password past the guard:
+        // stringConfig() trims, so " change-me " becomes "change-me".
+        $password = $this->stringConfig('openapi.admin_user.password', allowEmpty: true);
         $name = $this->stringConfig('openapi.admin_user.name');
         $adminRole = $this->stringConfig('openapi.admin_role');
 
@@ -54,14 +54,21 @@ final class AdminUserSeeder extends Seeder
     }
 
     /**
-     * Read a config value, asserting it is a string (and non-empty unless allowed)
-     * so misconfiguration fails fast instead of producing an invalid record.
+     * Read a config value, asserting it is a string, then trim it. Unless
+     * $allowEmpty is set, a value that is empty (or whitespace-only) after
+     * trimming fails fast instead of producing an invalid record.
      */
     private function stringConfig(string $key, bool $allowEmpty = false): string
     {
         $value = config($key);
 
-        if (! is_string($value) || (! $allowEmpty && $value === '')) {
+        if (! is_string($value)) {
+            throw new RuntimeException("Config [{$key}] must be a string.");
+        }
+
+        $value = trim($value);
+
+        if (! $allowEmpty && $value === '') {
             throw new RuntimeException("Config [{$key}] must be a non-empty string.");
         }
 
