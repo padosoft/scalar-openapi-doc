@@ -13,7 +13,7 @@ Every agent (main session or subagent) MUST read this file, `docs/RULES.md`, `do
 
 ## Machine Rules (Windows)
 
-- **Always use Herd PHP/Composer, never XAMPP PHP.** `php` and `composer` resolve to `C:\Users\lopad\.config\herd\bin\` shims (PHP 8.5.x). Do not invoke anything under `C:\xampp\php`.
+- **Always use Herd PHP/Composer, never XAMPP PHP.** `php` and `composer` must resolve to the Herd shims (typically `%USERPROFILE%\.config\herd\bin\`, PHP 8.5.x) on PATH. Do not invoke anything under `C:\xampp\php`. Verify with `(Get-Command php).Source` before relying on it.
 - Keep `.gitattributes` with `* text=auto eol=lf` to avoid CRLF churn.
 - Playwright `webServer` uses `php artisan serve` (Herd PHP on PATH).
 - If Vitest workers hang on Windows, prefer a Windows-safe `pool` setting (document the working choice in `docs/LESSON.md`).
