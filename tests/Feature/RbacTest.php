@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Models\User;
+use Database\Seeders\AdminUserSeeder;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
@@ -39,6 +40,18 @@ class RbacTest extends TestCase
         $admin = User::query()->where('email', config('openapi.admin_user.email'))->first();
         $this->assertNotNull($admin);
         $this->assertTrue($admin->hasRole(config('openapi.admin_role')));
+    }
+
+    public function test_admin_seeder_refuses_default_password_outside_local(): void
+    {
+        $this->app->detectEnvironment(fn () => 'production');
+        config(['openapi.admin_user.password' => 'change-me']);
+
+        $this->expectException(\RuntimeException::class);
+
+        // Invoke the seeder directly to test its guard (bypasses db:seed's own
+        // production confirmation prompt).
+        app(AdminUserSeeder::class)->run();
     }
 
     public function test_role_admin_middleware_forbids_non_admin_and_allows_admin(): void
