@@ -16,10 +16,11 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             // Uppercase HTTP verb (GET/POST/...); identity of an operation is (method, path).
             $table->string('method', 10);
-            // On MySQL: binary collation so /Pets ≠ /pets (OpenAPI paths are case-sensitive).
-            // SQLite UNIQUE is binary by default; collation keyword not supported there.
+            // On MySQL/MariaDB: binary collation so /Pets ≠ /pets (OpenAPI paths are
+            // case-sensitive). SQLite UNIQUE is binary by default; the collation
+            // keyword is not supported there.
             $col = $table->string('path', 255);
-            if (DB::getDriverName() === 'mysql') {
+            if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
                 $col->collation('utf8mb4_bin');
             }
             $table->timestamps();

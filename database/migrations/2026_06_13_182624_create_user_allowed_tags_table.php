@@ -14,10 +14,11 @@ return new class extends Migration
         Schema::create('user_allowed_tags', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            // On MySQL: binary collation so /Pets ≠ /pets (OpenAPI tags are case-sensitive).
-            // SQLite UNIQUE is binary by default; collation keyword not supported there.
+            // On MySQL/MariaDB: binary collation so "Orders" ≠ "orders" (OpenAPI tag
+            // names are case-sensitive identifiers). SQLite UNIQUE is binary by
+            // default; the collation keyword is not supported there.
             $col = $table->string('tag', 191);
-            if (DB::getDriverName() === 'mysql') {
+            if (in_array(DB::getDriverName(), ['mysql', 'mariadb'], true)) {
                 $col->collation('utf8mb4_bin');
             }
             $table->timestamps();
