@@ -19,12 +19,21 @@ class RbacTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
 
-        $this->assertTrue(Role::query()->where('name', (string) config('openapi.admin_role'))->exists());
+        // Roles are scoped by (name, guard_name); assert against the app's guard.
+        $guard = (string) config('auth.defaults.guard', 'web');
+
+        $this->assertTrue(Role::query()
+            ->where('name', (string) config('openapi.admin_role'))
+            ->where('guard_name', $guard)
+            ->exists());
 
         /** @var list<string> $viewerRoles */
         $viewerRoles = (array) config('openapi.viewer_roles', []);
         foreach ($viewerRoles as $viewerRole) {
-            $this->assertTrue(Role::query()->where('name', $viewerRole)->exists(), "Role '{$viewerRole}' not found.");
+            $this->assertTrue(
+                Role::query()->where('name', $viewerRole)->where('guard_name', $guard)->exists(),
+                "Role '{$viewerRole}' not found for guard '{$guard}'.",
+            );
         }
 
         $admin = User::query()->where('email', config('openapi.admin_user.email'))->first();
@@ -36,17 +45,15 @@ class RbacTest extends TestCase
     {
         $adminRole = (string) config('openapi.admin_role');
 
-        /** @var list<string> $viewerRoles */
-        $viewerRoles = (array) config('openapi.viewer_roles', []);
-        // Pick a non-admin viewer role (first role that is not the admin role).
-        $viewerRole = collect($viewerRoles)->first(fn (string $r) => $r !== $adminRole) ?? 'user';
-
         Route::middleware(['web', 'auth', "role:{$adminRole}"])->get('/__test-admin-only', fn () => 'ok');
 
         $this->seed(DatabaseSeeder::class);
 
+        // A non-admin user is forbidden. Create a dedicated non-admin role here so
+        // the test holds even under an "admins only" viewer_roles configuration.
+        $nonAdminRole = Role::findOrCreate('rbac-test-non-admin', (string) config('auth.defaults.guard', 'web'));
         $user = User::factory()->create();
-        $user->assignRole($viewerRole);
+        $user->assignRole($nonAdminRole);
         $this->actingAs($user)->get('/__test-admin-only')->assertForbidden();
 
         $admin = User::factory()->create();

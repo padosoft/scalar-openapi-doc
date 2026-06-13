@@ -19,9 +19,14 @@ final class RoleSeeder extends Seeder
         // Reset spatie's cached permissions before seeding.
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
+        // Roles must use the application's default auth guard — that's the guard
+        // spatie resolves from the authenticatable when checking/assigning roles,
+        // so seeding under any other guard would make hasRole()/assignRole() miss.
+        $guard = config('auth.defaults.guard', 'web');
+        $guard = is_string($guard) ? $guard : 'web';
+
         foreach ($this->roleNames() as $role) {
-            $guard = config('fortify.guard', 'web');
-            Role::findOrCreate($role, is_string($guard) ? $guard : 'web');
+            Role::findOrCreate($role, $guard);
         }
     }
 
