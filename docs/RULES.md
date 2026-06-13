@@ -27,7 +27,7 @@ Binding rules for all code in this repo. The workflow/branch/PR rules live in `A
 ## Security Rules
 
 - The OpenAPI spec is filtered **server-side per user**; the browser never receives operations the user isn't granted.
-- Granted tags/endpoints submitted from forms are re-validated server-side against the real spec before persistence (anti-tampering, ADR-05).
+- Granted tags/endpoints submitted from forms are re-validated server-side against the real spec before persistence — only values present in the current spec are stored (anti-tampering).
 - Never return secrets (upstream auth token, password hashes) in JSON, UI, or logs.
 - Proxy responses carrying per-user content set `Cache-Control: private, no-store`.
 - Upstream spec URL is validated (scheme + host whitelist) before any fetch (SSRF guard).

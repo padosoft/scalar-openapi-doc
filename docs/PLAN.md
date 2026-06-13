@@ -73,7 +73,7 @@ Dependencies: T1. No real Playwright (stub e2e ok).
 
 - **3.1 spatie/laravel-permission + roles** — install, `HasRoles` on User, `config/openapi.php` with `admin_role` key (fix B5), integrate `RoleSeeder`/`AdminUserSeeder` (env `ADMIN_EMAIL`/`ADMIN_PASSWORD`)/`DatabaseSeeder` from skeletons. Pest guardrails: seeder creates roles+admin; `role:admin` middleware registered and 403 for plain user.
 - **3.2 Custom migrations + models + enums** — `user_allowed_tags` (UNIQUE user_id+tag, CASCADE), `user_allowed_endpoints` (UNIQUE user_id+method+path, CASCADE), `scalar_servers`, `auth_logs` (user_id nullable SET NULL, email snapshot, event, ip 45, ua 512, created_at only, indexes). Enums `AuthEvent`/`HttpVerb`. Models + relationships + casts + `$fillable`. Pest guardrails: unique constraints, cascade, SET NULL, no updated_at on auth_logs.
-- **3.3 `ReplaceUserAccessAction`** — transaction: delete user rows → chunked bulk insert (ADR-07, no array_merge in loop). Pest guardrails: correct replace, empty arrays clear, atomic rollback on failure.
+- **3.3 `ReplaceUserAccessAction`** — transaction: delete user rows → chunked bulk insert (atomic delete-then-bulk-insert, no array_merge in loop). Pest guardrails: correct replace, empty arrays clear, atomic rollback on failure.
 
 Dependencies: T2. Can run in parallel with T4.
 
@@ -102,7 +102,7 @@ Dependencies: T3+T4.
 
 ## Macro Task 6 — `task/admin-users` (user CRUD + anti-tampering grants)
 
-- **6.1 FormRequest + controller (backend)** — `StoreUserRequest`/`UpdateUserRequest` (§6.5): name/email/password (confirmed on create, nullable on update), `roles` in configured names, `allowed_tags` `Rule::in(extractTags(fetchRaw()))`, `allowed_endpoints` `{method,path}` validated vs `extractEndpoints()` (ADR-05). `Admin\UserController` Inertia CRUD; store/update: `syncRoles` + `ReplaceUserAccessAction` in transaction. "Last admin" guard: forbidden to delete yourself / remove the last admin. Pest guardrails: tampered tags/endpoints → 422; correct replace; optional password on update; last admin guard; index with pagination+search.
+- **6.1 FormRequest + controller (backend)** — `StoreUserRequest`/`UpdateUserRequest` (§6.5): name/email/password (confirmed on create, nullable on update), `roles` in configured names, `allowed_tags` `Rule::in(extractTags(fetchRaw()))`, `allowed_endpoints` `{method,path}` validated vs `extractEndpoints()` (anti-tampering: only spec-existing values accepted). `Admin\UserController` Inertia CRUD; store/update: `syncRoles` + `ReplaceUserAccessAction` in transaction. "Last admin" guard: forbidden to delete yourself / remove the last admin. Pest guardrails: tampered tags/endpoints → 422; correct replace; optional password on update; last admin guard; index with pagination+search.
 - **6.2 Shared UI components** — `data-table.tsx` (TanStack+shadcn, sort, server-side pagination), `multi-select.tsx` (multi combobox with search), `confirm-dialog.tsx`, `role-badge.tsx`. **Vitest:** MultiSelect select/deselect/search/pre-selection; DataTable rows+pagination callback.
 - **6.3 Users pages (Inertia)** — `admin/users/index.tsx` (email/name/roles grid, text search, role filter, server-side pagination, row actions) and `form.tsx` create/edit with MultiSelect fed from `/api-docs/meta/*`, **pre-selection on edit**. **Playwright:** create user (form, role, 2 tags + 1 endpoint via search multiselect, submit, toast, appears in grid); edit (pre-selections visible, remove one, save, reopen → persisted); delete with confirm; search filters; role filter; pagination.
 

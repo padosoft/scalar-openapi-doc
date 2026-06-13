@@ -26,7 +26,7 @@ Every agent (main session or subagent) MUST read this file, `docs/RULES.md`, `do
 - **No `array_merge` inside loops**; use spread/collections and chunked bulk inserts.
 - Actions-oriented architecture: one action = one responsibility.
 - FormRequest for validation/authorization; API Resource for serialization; typed Enums for closed value sets.
-- Never trust client input for authorization. Granted tags/endpoints are validated server-side against the real spec (anti-tampering, ADR-05).
+- Never trust client input for authorization. Granted tags/endpoints are validated server-side against the real spec before persistence — only values that actually exist in the current spec are stored (anti-tampering).
 - Never expose secrets in JSON, UI, or logs (upstream auth token stays server-side).
 - Verbose comments only on non-obvious parts (especially the OpenAPI filter/pruning).
 - Update `docs/PROGRESS.md` after every meaningful step (it is the resume point if the session dies).
@@ -34,7 +34,7 @@ Every agent (main session or subagent) MUST read this file, `docs/RULES.md`, `do
 
 ## Branch & PR Loop (mandatory, per subtask)
 
-One branch per macro task: `task/<macro-name>` (created from `main`, pushed immediately). Each subtask is a child branch `task/<macro-name>-<n-n-slug>` (where `<n-n>` is macro-number–subtask-number, e.g. `task/t1-1-1-auth-model`) and gets a PR **into the macro branch**. When the macro task is complete, open the macro PR `task/<macro-name>` → `main` and run the same validation loop.
+One branch per macro task: `task/<macro-name>` (created from `main`, pushed immediately). Each subtask is a child branch `task/<macro-name>-<n-n>-<slug>` (where `<n-n>` is macro-number–subtask-number, e.g. for macro `project-conventions` subtask 1.1 → `task/project-conventions-1-1-agents`) and gets a PR **into the macro branch**. When the macro task is complete, open the macro PR `task/<macro-name>` → `main` and run the same validation loop.
 
 Definition of Done for every subtask:
 
@@ -69,7 +69,7 @@ Definition of Done for every subtask:
    ```
    Fallback for when `--add-reviewer copilot` fails (observed on this repo: `gh` cannot resolve the `copilot` login — error `Could not resolve user with login 'copilot'`; may also occur if the token lacks scopes). Use the PR node ID from `gh pr view <PR> --json id -q .id` (format `PR_kwDO...`):
    ```
-   gh api graphql -f query='mutation RequestReviewsByLogin($pullRequestId: ID!, $botLogins: [String!], $union: Boolean!) { requestReviewsByLogin(input: {pullRequestId: $pullRequestId, botLogins: $botLogins, union: $union}) { clientMutationId } }' -F pullRequestId='<PR_NODE_ID>' -F botLogins[]='copilot-pull-request-reviewer[bot]' -F union=true
+   gh api graphql -f query='mutation RequestReviewsByLogin($pullRequestId: ID!, $botLogins: [String!], $union: Boolean!) { requestReviewsByLogin(input: {pullRequestId: $pullRequestId, botLogins: $botLogins, union: $union}) { clientMutationId } }' -F pullRequestId='<PR_NODE_ID>' -F 'botLogins[]=copilot-pull-request-reviewer[bot]' -F union=true
    ```
    > **Note:** `requestReviewsByLogin` is not in the public GraphQL schema docs but is the proven working path for bot reviewers (verified in padosoft/product_image_discovery_admin). Always verify with the `requested_reviewers` call above that the review actually started; if the mutation errors, fall back to requesting the review from the GitHub PR web UI and record the blocker in `docs/PROGRESS.md`.
 6. Wait for **CI fully green** and **all configured bot reviewer comments** resolved (this repo has **two**: GitHub Copilot and the Codex connector — both are equally binding). Fix broken tests and every comment from either bot, push again, then re-request fresh reviews from all bots (Copilot: same commands from step 5; Codex: nudge with a `@codex review` PR comment), and repeat the loop.
