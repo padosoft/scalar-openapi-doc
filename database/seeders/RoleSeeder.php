@@ -31,16 +31,27 @@ final class RoleSeeder extends Seeder
     }
 
     /**
-     * Admin role + viewer roles, de-duplicated.
+     * Admin role + viewer roles, de-duplicated. Only non-empty string entries
+     * are kept, so a misconfigured value can't create a blank role.
      *
      * @return list<string>
      */
     private function roleNames(): array
     {
-        /** @var list<string> $viewers */
         $viewers = config('openapi.viewer_roles', []);
-        $admin = (string) config('openapi.admin_role');
+        $admin = config('openapi.admin_role');
 
-        return array_values(array_unique([$admin, ...$viewers]));
+        $names = [
+            ...(is_string($admin) ? [$admin] : []),
+            ...(is_array($viewers) ? $viewers : []),
+        ];
+
+        $names = array_values(array_filter(
+            $names,
+            static fn (mixed $n): bool => is_string($n) && $n !== '',
+        ));
+
+        /** @var list<string> $names */
+        return array_values(array_unique($names));
     }
 }

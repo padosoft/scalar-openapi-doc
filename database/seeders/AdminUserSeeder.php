@@ -22,8 +22,10 @@ final class AdminUserSeeder extends Seeder
 
     public function run(): void
     {
-        $email = (string) config('openapi.admin_user.email');
-        $password = (string) config('openapi.admin_user.password');
+        $email = $this->stringConfig('openapi.admin_user.email');
+        $password = $this->stringConfig('openapi.admin_user.password', allowEmpty: true);
+        $name = $this->stringConfig('openapi.admin_user.name');
+        $adminRole = $this->stringConfig('openapi.admin_role');
 
         // Never provision a predictable admin outside local/testing: refuse to
         // seed when the password is empty or still the documented placeholder.
@@ -38,15 +40,29 @@ final class AdminUserSeeder extends Seeder
         $admin = User::query()->firstOrCreate(
             ['email' => $email],
             [
-                'name' => (string) config('openapi.admin_user.name'),
+                'name' => $name,
                 'password' => Hash::make($password),
                 'email_verified_at' => now(),
             ],
         );
 
-        $adminRole = (string) config('openapi.admin_role');
         if (! $admin->hasRole($adminRole)) {
             $admin->assignRole($adminRole);
         }
+    }
+
+    /**
+     * Read a config value, asserting it is a string (and non-empty unless allowed)
+     * so misconfiguration fails fast instead of producing an invalid record.
+     */
+    private function stringConfig(string $key, bool $allowEmpty = false): string
+    {
+        $value = config($key);
+
+        if (! is_string($value) || (! $allowEmpty && $value === '')) {
+            throw new RuntimeException("Config [{$key}] must be a non-empty string.");
+        }
+
+        return $value;
     }
 }

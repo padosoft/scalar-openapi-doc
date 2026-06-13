@@ -205,18 +205,6 @@ parameters:
 			path: database/migrations/2026_06_13_164227_create_permission_tables.php
 
 		-
-			message: '#^Cannot cast mixed to string\.$#'
-			identifier: cast.string
-			count: 4
-			path: database/seeders/AdminUserSeeder.php
-
-		-
-			message: '#^Cannot cast mixed to string\.$#'
-			identifier: cast.string
-			count: 1
-			path: database/seeders/RoleSeeder.php
-
-		-
 			message: '#^Cannot call method name\(\) on mixed\.$#'
 			identifier: method.nonObject
 			count: 1
