@@ -51,8 +51,8 @@ A subtask is **done** only when all of the following hold:
 3. **Guardrails** exist and pass: Pest + Vitest + (Playwright if any UI interaction).
 4. **Local gates green:** `vendor/bin/pint --test`, `vendor/bin/phpstan analyse --level=max`, `php artisan test`, `npm run test`, `npm run build`, and `npx playwright test` (when UI).
 5. **Local Copilot review** returns zero actionable comments (loop in `AGENTS.md` step 3).
-6. **PR opened** into the macro branch; **Copilot requested as reviewer** and confirmed started.
-7. **CI green** and **all review threads resolved** (Copilot — and any other configured bot reviewer such as Codex on this repo).
+6. **PR opened** into the macro branch; **Copilot requested as reviewer** and confirmed started. The repo's Codex connector auto-reviews on PR open — no manual request needed, but its comments are equally binding.
+7. **CI green** and **all bot review threads resolved** — both Copilot **and** Codex (the two configured reviewers on this repo). It must not be possible to pass DoD while skipping either.
 8. **Docs updated:** `docs/PROGRESS.md` after the step; `docs/LESSON.md` for anything learned.
 9. **Merged.**
 

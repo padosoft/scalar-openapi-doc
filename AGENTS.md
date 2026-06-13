@@ -67,7 +67,7 @@ Definition of Done for every subtask:
    gh pr edit <PR> --add-reviewer copilot
    gh api repos/padosoft/scalar-openapi-doc/pulls/<PR>/requested_reviewers
    ```
-   Fallback when the token lacks scopes (`--add-reviewer copilot` fails — use the PR node ID from `gh pr view <PR> --json id -q .id`, format `PR_kwDO...`):
+   Fallback for when `--add-reviewer copilot` fails (observed on this repo: `gh` cannot resolve the `copilot` login — error `Could not resolve user with login 'copilot'`; may also occur if the token lacks scopes). Use the PR node ID from `gh pr view <PR> --json id -q .id` (format `PR_kwDO...`):
    ```
    gh api graphql -f query='mutation RequestReviewsByLogin($pullRequestId: ID!, $botLogins: [String!], $union: Boolean!) { requestReviewsByLogin(input: {pullRequestId: $pullRequestId, botLogins: $botLogins, union: $union}) { clientMutationId } }' -F pullRequestId='<PR_NODE_ID>' -F botLogins[]='copilot-pull-request-reviewer[bot]' -F union=true
    ```
