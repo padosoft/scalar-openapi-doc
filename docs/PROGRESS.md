@@ -6,8 +6,8 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 
 | # | Macro task | Branch | Status | Macro PR |
 |---|---|---|---|---|
-| T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟡 macro PR pending → `main` | — |
-| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | ⚪ pending | — |
+| T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟢 merged (PR #3 → `main`, `691db58`) | #3 |
+| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟡 in progress (2.1 scaffold) | — |
 | T3 | RBAC & data model | `task/rbac-data-model` | ⚪ pending | — |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | ⚪ pending | — |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | ⚪ pending | — |
@@ -45,7 +45,13 @@ Branch: `task/project-conventions-1-3-skill` → PR into `task/project-conventio
 ---
 
 ## T2 — task/bootstrap
-_Not started._
+
+### Subtask 2.1 — scaffold Laravel 13 + react-starter-kit
+Branch: `task/bootstrap-2-1-scaffold` → PR into `task/bootstrap`.
+
+- Scaffolding `laravel new ... --react --pest --database=mysql` into a temp sibling dir `C:\xampp\htdocs\scalar-openapi-doc-tmp`, then copying app files into the repo preserving `.git`, LICENSE, AGENTS.md, CLAUDE.md, docs/, .claude/, .gitattributes (starter README set aside; rewritten in T9).
+- `.env` dev target: MySQL via Herd (db `scalar_openapi_doc`), `CACHE_STORE=redis`.
+- Verify: `php artisan about` on Herd, `npm run build`, login page renders, starter Pest tests pass.
 
 ## T3 — task/rbac-data-model
 _Not started._
