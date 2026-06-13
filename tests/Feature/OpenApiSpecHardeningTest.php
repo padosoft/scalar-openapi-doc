@@ -167,6 +167,16 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered)->not->toHaveKey('webhooks');
     }
 
+    public function test_root_security_schemes_are_dropped_when_no_operation_survives(): void
+    {
+        // The 3.1 fixture declares a root-level `security: [{ApiKeyAuth: []}]`. A
+        // non-admin with no grants keeps zero operations, so no operation inherits
+        // the root security and the securityScheme must NOT survive pruning.
+        $filtered = $this->service()->filterForUser($this->spec31(), collect([]), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
     public function test_prune_components_off_keeps_all_components(): void
     {
         config(['openapi.prune_components' => false]);
@@ -206,6 +216,23 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($out['servers'])->toBe([
             ['url' => 'https://api.example.com', 'description' => 'Prod'],
             ['url' => 'https://staging.example.com'],
+        ]);
+    }
+
+    public function test_inject_servers_rejects_non_url_and_unsafe_scheme_values(): void
+    {
+        // Non-empty but invalid URLs (schemeless, javascript:, ftp:) must be
+        // skipped just like empty ones, so a seed/import bypassing the
+        // FormRequest can't inject a dangerous server into Scalar.
+        $out = $this->service()->injectServers(['openapi' => '3.1.0'], [
+            ['url' => 'not-a-url'],
+            ['url' => 'javascript:alert(1)'],
+            ['url' => 'ftp://files.example.com'],
+            ['url' => '  https://api.example.com  '],
+        ]);
+
+        expect($out['servers'])->toBe([
+            ['url' => 'https://api.example.com'],
         ]);
     }
 }

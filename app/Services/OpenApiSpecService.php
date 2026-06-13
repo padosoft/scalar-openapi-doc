@@ -277,19 +277,22 @@ final class OpenApiSpecService
      */
     public function injectServers(array $spec, array $servers): array
     {
-        // Validate each entry (B7): a server needs a non-empty URL; description is
-        // optional. Malformed entries are skipped with a warning, never breaking
-        // the spec the browser receives.
+        // Validate each entry (B7): a server needs a syntactically valid absolute
+        // http(s) URL; description is optional. Malformed entries (missing/empty,
+        // or non-URL values like "not-a-url" / "javascript:alert(1)" that could
+        // bypass the FormRequest via a seed/import) are skipped with a warning,
+        // never breaking the spec — or injecting a dangerous URL into the
+        // playground dropdown Scalar renders.
         $valid = [];
         foreach ($servers as $server) {
             $url = $server['url'] ?? null;
-            if (! is_string($url) || trim($url) === '') {
-                Log::warning('Skipping invalid OpenAPI server entry (missing/empty url)', ['server' => $server]);
+            if (! is_string($url) || ! $this->isValidServerUrl($url)) {
+                Log::warning('Skipping invalid OpenAPI server entry (missing/empty/malformed url)', ['server' => $server]);
 
                 continue;
             }
 
-            $entry = ['url' => $url];
+            $entry = ['url' => trim($url)];
             $description = $server['description'] ?? null;
             if (is_string($description) && $description !== '') {
                 $entry['description'] = $description;
@@ -441,9 +444,15 @@ final class OpenApiSpecService
     }
 
     /**
-     * Security scheme names referenced by the spec — from the root `security`
-     * and from each operation's `security` in paths + webhooks. These reference
-     * `components.securitySchemes.<name>` by name, not by $ref.
+     * Security scheme names actually reachable from the (already-filtered) spec.
+     * These reference `components.securitySchemes.<name>` by name, not by $ref.
+     *
+     * An operation with its own `security` key overrides the root requirement
+     * (including `security: []`, an explicit opt-out); an operation without one
+     * inherits the root `security`. So the root-level schemes are reachable only
+     * when at least one surviving operation inherits them — otherwise (e.g. a
+     * non-admin left with zero operations) they must NOT keep the root schemes
+     * alive during pruning.
      *
      * @param  array<array-key, mixed>  $spec
      * @return list<string>
@@ -451,6 +460,7 @@ final class OpenApiSpecService
     private function securitySchemeNames(array $spec): array
     {
         $names = [];
+        $rootInherited = false;
 
         $collect = function (mixed $security) use (&$names): void {
             foreach ($this->asArray($security) as $requirement) {
@@ -462,14 +472,20 @@ final class OpenApiSpecService
             }
         };
 
-        $collect($spec['security'] ?? null);
-
         foreach (['paths', 'webhooks'] as $container) {
             foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
                 foreach ($this->operations($pathItem) as $operation) {
-                    $collect($operation['security'] ?? null);
+                    if (array_key_exists('security', $operation)) {
+                        $collect($operation['security']);
+                    } else {
+                        $rootInherited = true;
+                    }
                 }
             }
+        }
+
+        if ($rootInherited) {
+            $collect($spec['security'] ?? null);
         }
 
         return array_keys($names);
@@ -554,6 +570,21 @@ final class OpenApiSpecService
         if ($hosts !== [] && ! in_array($host, array_map('strtolower', $hosts), true)) {
             throw new InvalidOpenApiSpecException("OpenAPI upstream host [{$host}] is not allowed.");
         }
+    }
+
+    /**
+     * A playground server URL must be a syntactically valid ABSOLUTE http(s)
+     * URL. This rejects empty/whitespace, schemeless ("not-a-url") and unsafe
+     * schemes ("javascript:…") before they reach the spec the browser renders.
+     */
+    private function isValidServerUrl(string $url): bool
+    {
+        $parts = parse_url(trim($url));
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
+            return false;
+        }
+
+        return in_array(strtolower((string) $parts['scheme']), ['http', 'https'], true);
     }
 
     /**
