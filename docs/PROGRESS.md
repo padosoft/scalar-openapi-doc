@@ -2,6 +2,9 @@
 
 This is the resume point. If a session dies, the next agent reads this file (plus `AGENTS.md`, `docs/RULES.md`, `docs/LESSON.md`) and continues exactly from here. Update it after every meaningful step. Newest entries at the bottom of each task.
 
+> **⚠️ Active blocker (2026-06-13): GitHub Copilot reviewer unavailable org-wide.**
+> The Copilot org spend limit is reached (`additional_spend_limit_reached`, HTTP 402): the **local** `copilot` CLI returns 402 AND the **remote** Copilot PR reviewer bot no longer attaches (re-requests leave `requested_reviewers` empty). **Codex remote review still works** and CI is green. Per the amended AGENTS.md, binding review continues via **Codex + CI + local gates** (pint, phpstan max, pest, vitest, build); each merge is gated on those. **Action for the owner:** raise/clear the Copilot spend limit at github.com/settings/copilot/features to restore Copilot reviews. Until then, Copilot-review is treated as unavailable (documented per-PR).
+
 ## Macro Task Status
 
 | # | Macro task | Branch | Status | Macro PR |
