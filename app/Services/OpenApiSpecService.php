@@ -655,10 +655,12 @@ final class OpenApiSpecService
      * filtered and enumerated. Sibling keys take precedence over the target.
      *
      * The whole `$ref` chain is followed (cycle-safe) and NO path-item `$ref`
-     * survives in the result: a nested/dangling/cyclic ref is dropped. This is
-     * essential — if a `#/components/pathItems/…` ref leaked into the filtered
+     * survives in the result: a nested, dangling, cyclic, malformed, OR
+     * external/unsupported (non-`#/components/pathItems/`) ref is dropped. This
+     * is essential — if a `#/components/pathItems/…` ref leaked into the filtered
      * output, pruneComponents() would follow it and keep that entire (unfiltered)
-     * path item, exposing operations the user was never granted.
+     * path item; and any other surviving path-item ref could point the response
+     * at content that was never filtered. We inline only resolved operations.
      *
      * @param  array<array-key, mixed>  $pathItemComponents
      * @return array<array-key, mixed>
@@ -671,13 +673,19 @@ final class OpenApiSpecService
 
         while (true) {
             $ref = $item['$ref'] ?? null;
-            if (! is_string($ref) || ! str_starts_with($ref, $prefix)) {
-                break;
+            if ($ref === null) {
+                break; // nothing left to resolve
             }
 
-            // Always drop the ref; we either inline its target or discard a
-            // broken/cyclic one — never leave it for pruning to follow.
+            // Invariant: NO path-item $ref survives the result. Always drop it —
+            // we either inline its components.pathItems target below, or discard
+            // a malformed / external / unsupported / cyclic ref so the filtered
+            // response can never point at unfiltered (or pruning-reachable) content.
             unset($item['$ref']);
+
+            if (! is_string($ref) || ! str_starts_with($ref, $prefix)) {
+                break; // malformed or unsupported (external/non-pathItems) ref: dropped
+            }
 
             $name = substr($ref, strlen($prefix));
             if (isset($seen[$name])) {

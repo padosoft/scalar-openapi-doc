@@ -324,6 +324,43 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components']['pathItems'] ?? [])->toBe([]);
     }
 
+    public function test_strips_unsupported_external_ref_but_keeps_granted_local_op(): void
+    {
+        // An external/unsupported path-item $ref alongside a granted local op:
+        // the $ref must be stripped (invariant: no path-item $ref survives), the
+        // granted GET inlined.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/mix' => [
+                '$ref' => './external.yaml#/paths/~1foo',
+                'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/mix'])
+            ->and($filtered['paths']['/mix'])->toHaveKey('get')
+            ->and($filtered['paths']['/mix'])->not->toHaveKey('$ref');
+    }
+
+    public function test_drops_path_item_that_is_only_an_unsupported_ref(): void
+    {
+        // A path item that is ONLY an unresolvable external ref has no local
+        // operation to filter, so after stripping the ref the entry is dropped —
+        // even if an endpoint grant nominally targets its key.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/ext' => ['$ref' => 'https://other.example.com/spec.json#/paths/~1x']],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect([]), collect(['GET /ext']));
+
+        expect($filtered['paths'])->toBe([]);
+    }
+
     public function test_metadata_includes_referenced_path_item_operations(): void
     {
         $spec = $this->specWithPathItemRef();
