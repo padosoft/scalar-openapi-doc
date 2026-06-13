@@ -197,9 +197,33 @@ class OpenApiSpecHardeningTest extends TestCase
 
     public function test_extract_endpoints_includes_webhook_operations(): void
     {
-        $labels = collect($this->service()->extractEndpoints($this->spec31()))->pluck('label')->all();
+        $endpoints = collect($this->service()->extractEndpoints($this->spec31()));
 
-        expect($labels)->toContain('GET /secure')->toContain('POST newOrder');
+        // Webhook operations carry a "(webhook)" label and a namespaced grant path.
+        expect($endpoints->pluck('label')->all())
+            ->toContain('GET /secure')->toContain('POST newOrder (webhook)')
+            ->and($endpoints->firstWhere('label', 'POST newOrder (webhook)')['path'])
+            ->toBe('webhook:newOrder');
+    }
+
+    public function test_path_and_webhook_endpoint_grants_do_not_collide(): void
+    {
+        // A webhook keyed identically to a real path (both "/orders") must not be
+        // exposed by a grant for the other container.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/orders' => ['post' => ['responses' => ['200' => ['description' => 'ok']]]]],
+            'webhooks' => ['/orders' => ['post' => ['responses' => ['200' => ['description' => 'ok']]]]],
+        ];
+
+        $byPath = $this->service()->filterForUser($spec, collect([]), collect(['POST /orders']));
+        expect(array_keys($byPath['paths']))->toBe(['/orders'])
+            ->and($byPath)->not->toHaveKey('webhooks');
+
+        $byWebhook = $this->service()->filterForUser($spec, collect([]), collect(['POST webhook:/orders']));
+        expect($byWebhook['paths'])->toBe([])
+            ->and(array_keys($byWebhook['webhooks']))->toBe(['/orders']);
     }
 
     // ---- B7: injectServers validation -------------------------------------

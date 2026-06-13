@@ -33,6 +33,17 @@ final class OpenApiSpecService
      */
     private const HTTP_VERBS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
 
+    /**
+     * Namespace prefix for a webhook operation's canonical endpoint "path".
+     *
+     * OpenAPI requires path keys to start with "/", but webhook keys are
+     * arbitrary strings — so a webhook could be keyed identically to a real path
+     * (e.g. both "/orders"). Prefixing webhook grant keys keeps the two address
+     * spaces disjoint, so a "POST /orders" path grant can never match a webhook
+     * keyed "/orders" (and vice-versa).
+     */
+    private const WEBHOOK_GRANT_PREFIX = 'webhook:';
+
     // ---------------------------------------------------------------------
     // Upstream fetch + cache
     // ---------------------------------------------------------------------
@@ -184,18 +195,21 @@ final class OpenApiSpecService
     {
         $endpoints = [];
 
-        // Endpoints from both paths and webhooks (a webhook's key is used as its
-        // "path", matching how filterForUser resolves "METHOD key" grants).
+        // Endpoints from both paths and webhooks. A webhook's grant "path" is
+        // namespaced (WEBHOOK_GRANT_PREFIX) so it can never collide with a real
+        // path keyed identically — matching how filterForUser resolves grants.
         foreach (['paths', 'webhooks'] as $container) {
-            foreach ($this->asArray($spec[$container] ?? null) as $path => $pathItem) {
-                $path = (string) $path;
+            $isWebhook = $container === 'webhooks';
+            foreach ($this->asArray($spec[$container] ?? null) as $key => $pathItem) {
+                $key = (string) $key;
+                $grantPath = $this->canonicalEndpointPath($container, $key);
                 foreach ($this->operations($pathItem) as $method => $operation) {
                     $upper = strtoupper($method);
                     $summary = $operation['summary'] ?? null;
                     $endpoints[] = [
                         'method' => $upper,
-                        'path' => $path,
-                        'label' => $upper.' '.$path,
+                        'path' => $grantPath,
+                        'label' => $upper.' '.$key.($isWebhook ? ' (webhook)' : ''),
                         'summary' => is_string($summary) ? $summary : null,
                     ];
                 }
@@ -236,10 +250,10 @@ final class OpenApiSpecService
 
         // Rebuild paths AND webhooks (OpenAPI 3.1) with the same rules, so a
         // non-admin never receives ungranted webhook operations either.
-        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags);
+        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags, 'paths');
 
         if (isset($spec['webhooks'])) {
-            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags);
+            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags, 'webhooks');
             if ($webhooks === []) {
                 unset($spec['webhooks']);
             } else {
@@ -500,9 +514,10 @@ final class OpenApiSpecService
      * @param  array<string, int>  $tagSet
      * @param  array<string, int>  $endpointSet
      * @param  array<string, true>  $usedTags  (by-ref accumulator)
+     * @param  'paths'|'webhooks'  $container  namespaces webhook endpoint grants
      * @return array<string, mixed>
      */
-    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags): array
+    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags, string $container): array
     {
         $result = [];
 
@@ -525,7 +540,7 @@ final class OpenApiSpecService
                     static fn (mixed $t): bool => is_string($t),
                 ));
                 $byTag = array_intersect_key($tagSet, array_flip($operationTags)) !== [];
-                $byEndpoint = isset($endpointSet[strtoupper($verb).' '.$key]);
+                $byEndpoint = isset($endpointSet[strtoupper($verb).' '.$this->canonicalEndpointPath($container, $key)]);
 
                 if (! $byTag && ! $byEndpoint) {
                     continue; // drop this operation
@@ -570,6 +585,19 @@ final class OpenApiSpecService
         if ($hosts !== [] && ! in_array($host, array_map('strtolower', $hosts), true)) {
             throw new InvalidOpenApiSpecException("OpenAPI upstream host [{$host}] is not allowed.");
         }
+    }
+
+    /**
+     * Canonical endpoint "path" for grant matching. Path operations keep their
+     * raw key ("/orders"); webhook operations are namespaced (WEBHOOK_GRANT_PREFIX)
+     * so they live in a disjoint address space and can never be matched by — or
+     * leak through — a grant intended for an identically-keyed real path (B5).
+     *
+     * @param  'paths'|'webhooks'  $container
+     */
+    private function canonicalEndpointPath(string $container, string $key): string
+    {
+        return $container === 'webhooks' ? self::WEBHOOK_GRANT_PREFIX.$key : $key;
     }
 
     /**
