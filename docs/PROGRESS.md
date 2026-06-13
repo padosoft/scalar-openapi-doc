@@ -78,6 +78,18 @@ _Not started. Seeder skeletons reviewed: `RoleSeeder` (spatie `Role::findOrCreat
 
 **Carried into T3 (from PR #7 / Codex):** disable Fortify self-registration — `Features::registration()` in `config/fortify.php` lets anyone sign up, bypassing the admin-provisioned/RBAC model. Remove the feature and the register link/page (`resources/js/pages/auth/register.tsx`, route, `RegistrationTest`) since users are created by admins only.
 
+### Subtask 3.2 — custom data model (migrations, enums, models)
+Branch: `task/rbac-data-model-3-2-models`
+
+- Migrations: `user_allowed_tags`, `user_allowed_endpoints`, `scalar_servers`, `auth_logs`.
+- Enums: `AuthEvent` (login/logout/failed), `HttpVerb` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS/TRACE + `values()` helper).
+- Models: `UserAllowedTag`, `UserAllowedEndpoint` (method cast to `HttpVerb`), `ScalarServer`, `AuthLog` (`UPDATED_AT=null`, `created_at` NOT NULL `useCurrent()`).
+- `User` hasMany: `allowedTags`, `allowedEndpoints`, `authLogs`.
+- `DataModelTest` (9 tests): unique constraints, cascade, SET NULL, casts, HttpVerb cast, values(), HasMany relations.
+- **Copilot review loop (3 rounds):** all 6 findings fixed — phantom `app/Enums/Enums/HttpVerb.php` deleted, HttpVerb cast added to UserAllowedEndpoint, redundant `index('user_id')` removed from grant migrations, auth_logs.created_at NOT NULL + useCurrent(), TRACE added to HttpVerb, auth_logs.email widened to 255, utf8mb4_bin collation on tag/path for MySQL **and MariaDB** (guarded with `in_array(DB::getDriverName(), ['mysql','mariadb'])` for SQLite compat).
+- All gates green: Pest 52/52, Pint clean, PHPStan max (0 errors), final review → NO FINDINGS.
+- **Status:** 🟡 in review — PR #10 into `task/rbac-data-model`.
+
 ## T4 — task/openapi-service
 _Not started._
 

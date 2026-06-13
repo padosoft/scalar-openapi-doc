@@ -9,6 +9,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -49,5 +50,35 @@ class User extends Authenticatable implements PasskeyUser
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
         ];
+    }
+
+    /**
+     * OpenAPI tags granted to this user.
+     *
+     * @return HasMany<UserAllowedTag, $this>
+     */
+    public function allowedTags(): HasMany
+    {
+        return $this->hasMany(UserAllowedTag::class);
+    }
+
+    /**
+     * OpenAPI operations granted to this user.
+     *
+     * @return HasMany<UserAllowedEndpoint, $this>
+     */
+    public function allowedEndpoints(): HasMany
+    {
+        return $this->hasMany(UserAllowedEndpoint::class);
+    }
+
+    /**
+     * Authentication audit rows for this user.
+     *
+     * @return HasMany<AuthLog, $this>
+     */
+    public function authLogs(): HasMany
+    {
+        return $this->hasMany(AuthLog::class);
     }
 }
