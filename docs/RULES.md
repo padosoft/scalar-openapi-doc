@@ -50,9 +50,9 @@ A subtask is **done** only when all of the following hold:
 2. **Implementation** matches the standards above.
 3. **Guardrails** exist and pass: Pest + Vitest + (Playwright if any UI interaction).
 4. **Local gates green:** `vendor/bin/pint --test`, `vendor/bin/phpstan analyse --level=max`, `php artisan test`, `npm run test`, `npm run build`, and `npx playwright test` (when UI).
-5. **Local Copilot review** returns zero actionable comments (loop in `AGENTS.md` step 3).
-6. **PR opened** into the macro branch; **Copilot requested as reviewer** and confirmed started. The repo's Codex connector auto-reviews on PR open — no manual request needed, but its comments are equally binding.
-7. **CI green** and **all bot review threads resolved** — both Copilot **and** Codex (the two configured reviewers on this repo). It must not be possible to pass DoD while skipping either.
+5. **Local Copilot review** (pre-push pre-filter) returns zero actionable comments — or, if the local `copilot` CLI is unavailable (quota/outage), the blocker is recorded in `docs/PROGRESS.md` (loop + fallback in `AGENTS.md` step 3).
+6. **PR opened** into the macro branch; **Copilot requested as reviewer** and confirmed started. The repo's Codex connector auto-reviews on PR open — no manual request needed; both are binding **when available**.
+7. **CI green** and **all available bot review threads resolved** — both Copilot **and** Codex when both are up. It must not be possible to pass DoD while silently skipping an *available* reviewer; a bot that is unavailable **org-wide** (documented outage in `docs/PROGRESS.md`, e.g. Copilot spend limit) does not block — review is carried by the remaining reviewer(s) + CI + local gates (`AGENTS.md` step 6 reviewer-outage exception).
 8. **Docs updated:** `docs/PROGRESS.md` after the step; `docs/LESSON.md` for anything learned.
 9. **Merged.**
 

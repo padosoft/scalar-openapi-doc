@@ -58,6 +58,8 @@ Definition of Done for every subtask:
    copilot --autopilot --yolo -p "/review Review the attached diff (branch vs PR base) at $env:TEMP\pr-diff.txt. DO NOT modify or commit any files - report findings only. Reply 'NO FINDINGS' if clean."
    ```
    Pass the **full branch diff vs the PR base** (not just unstaged files). The review prompt MUST say "report findings only": `--autopilot --yolo` grants all tools and *will edit and commit files* otherwise (see `docs/LESSON.md`). If a finding is real, you apply the fix yourself and re-review; never let the review tool mutate the branch behind the gate. Fix every finding, re-run gates, re-review, until the review returns zero actionable comments.
+
+   The local Copilot review is a **pre-push pre-filter**; the binding gate is the **remote** PR review (step 6). If the local `copilot` CLI is unavailable (e.g. HTTP 402 `additional_spend_limit_reached`, network outage), do **not** fake it: record the blocker in `docs/PROGRESS.md`, ensure the local test/static gates (pint, phpstan, pest, vitest, build) are all green, and proceed to push — the remote Copilot + Codex reviewers (billed separately) still enforce the review gate at step 6. Stop and ask the user only if the *remote* reviewers are also unavailable.
 4. Push and open the PR with `gh`:
    ```
    git push -u origin <subtask-branch>
@@ -73,10 +75,12 @@ Definition of Done for every subtask:
    gh api graphql -f query='mutation RequestReviewsByLogin($pullRequestId: ID!, $botLogins: [String!], $union: Boolean!) { requestReviewsByLogin(input: {pullRequestId: $pullRequestId, botLogins: $botLogins, union: $union}) { clientMutationId } }' -F pullRequestId='<PR_NODE_ID>' -F 'botLogins[]=copilot-pull-request-reviewer[bot]' -F union=true
    ```
    > **Note:** `requestReviewsByLogin` is not in the public GraphQL schema docs but is the proven working path for bot reviewers (verified in padosoft/product_image_discovery_admin). Always verify with the `requested_reviewers` call above that the review actually started; if the mutation errors, fall back to requesting the review from the GitHub PR web UI and record the blocker in `docs/PROGRESS.md`.
-6. Wait for **CI fully green** and **all configured bot reviewer comments** resolved (this repo has **two**: GitHub Copilot and the Codex connector — both are equally binding). Fix broken tests and every comment from either bot, push again, then re-request fresh reviews from all bots (Copilot: same commands from step 5; Codex: nudge with a `@codex review` PR comment), and repeat the loop.
-7. Only when CI is green and all review threads are resolved: **merge** the PR, update `docs/PROGRESS.md` (and `docs/LESSON.md` for anything learned), then move to the next subtask.
+6. Wait for **CI fully green** and **all configured bot reviewer comments** resolved (this repo has **two**: GitHub Copilot and the Codex connector — both are binding **when available**). Fix broken tests and every comment from either bot, push again, then re-request fresh reviews from all available bots (Copilot: same commands from step 5; Codex: nudge with a `@codex review` PR comment), and repeat the loop.
 
-Never skip a gate silently. If a tool is unavailable (Copilot quota, CI outage, network), record the exact blocker in `docs/PROGRESS.md` and stop or ask the user — do not pretend the gate passed.
+   **Reviewer-outage exception:** if a bot reviewer is unavailable org-wide (e.g. the Copilot spend limit blocks both the CLI and the PR reviewer — re-requests leave `requested_reviewers` empty), record it in `docs/PROGRESS.md` and proceed with the **remaining** binding gates: CI green + the still-working reviewer(s) (Codex) + the full local gate set. Re-enable the bot once it returns. Stop/ask the user only if **CI** or **all** remote reviewers are unavailable.
+7. Only when CI is green and all available review threads are resolved: **merge** the PR, update `docs/PROGRESS.md` (and `docs/LESSON.md` for anything learned), then move to the next subtask.
+
+Never skip a gate silently. If a tool is unavailable, record the exact blocker in `docs/PROGRESS.md`. The **local** Copilot CLI is a pre-filter (step 3 fallback applies). For the **binding** gates: CI must be green (never fake it); remote reviewers are binding when available, with the reviewer-outage exception above for a documented org-wide bot outage.
 
 ## Testing Rules
 

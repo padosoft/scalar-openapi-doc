@@ -6,6 +6,10 @@ Format per entry: `- **[area]** lesson. **Why:** … **How to apply:** …`
 
 ---
 
+## 2026-06-13 (later)
+
+- **[copilot/cli-quota]** The **local** `copilot --autopilot --yolo -p "/review …"` pre-push review can hit `additional_spend_limit_reached` (HTTP 402) once the Copilot CLI usage limit is reached. **Why:** it's a billed CLI separate from the GitHub PR Copilot reviewer bot. **How to apply:** the local review is a *pre-filter*, not the binding gate — when it's quota-blocked, do NOT fake it; record the blocker and rely on your own green gates (pint/phpstan/pest/vitest/build) plus the **remaining available remote PR reviewers**. Note the org-wide Copilot spend limit takes down **both** the CLI *and* the remote Copilot reviewer bot (re-requests leave `requested_reviewers` empty); in that case Codex is the available remote reviewer and the [AGENTS reviewer-outage exception](../AGENTS.md) applies. Reset/limit lives at github.com/settings/copilot/features.
+
 ## 2026-06-13
 
 - **[ci/review]** This repo has **two** automated PR reviewers configured: GitHub **Copilot** and a **Codex connector** (`chatgpt-codex-connector[bot]`). Codex auto-triggers on PR open / ready-for-review / `@codex review`. **Why:** the workflow contract said "Copilot review" but both bots comment, and their findings must both be resolved. **How to apply:** when waiting for reviews, poll for both bots; treat Codex findings as equally binding. You can nudge Codex with a `@codex review` PR comment.
