@@ -80,6 +80,7 @@
       "Read(./.env.*.local)",
       "Read(./.env.development)",
       "Read(./.env.testing)",
+      "Read(./.env.testing.*)",
       "Read(./.env.staging)",
       "Read(./.env.production)",
       "Read(./.env.backup)",
