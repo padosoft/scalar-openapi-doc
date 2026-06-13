@@ -22,7 +22,7 @@ Legend: ⚪ pending · 🟡 in progress · 🟢 merged.
 
 ## T1 — task/project-conventions
 
-### Subtask 1.1 + 1.2 — operating docs (AGENTS.md, CLAUDE.md, docs/*) + .gitattributes
+### Subtask 1.1 + 1.2 — operating docs (AGENTS.md, CLAUDE.md, `docs/*`) + .gitattributes
 Branch: `task/project-conventions-1-1-agents` → PR #1 into `task/project-conventions`.
 
 - Created `AGENTS.md` (operating contract: branch/PR loop, Copilot review gates, testing rules, Herd machine rules, subagent rules, release rules) and `CLAUDE.md` (quick reference).

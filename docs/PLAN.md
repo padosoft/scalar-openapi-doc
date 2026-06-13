@@ -156,5 +156,5 @@ Single `ci.yml`: ubuntu-latest, setup-php 8.5 (fallback 8.4), parallel jobs pint
 ## Verification (for the entire project)
 
 - Every subtask: `vendor/bin/pint --test` + `vendor/bin/phpstan analyse` + `php artisan test` (Pest) + `npm run test` (Vitest) + `npm run build` + `npx playwright test` (if UI) all green locally (Herd PHP 8.5) and on CI.
-- Final E2E: full authorisation matrix + "two users, disjoint grants, different Scalar sidebars" scenario (T8.2).
+- Final E2E: full authorization matrix + "two users, disjoint grants, different Scalar sidebars" scenario (T8.2).
 - README Quick Start verified on a clean clone before tagging (T9.1).
