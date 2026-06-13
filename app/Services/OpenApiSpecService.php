@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exceptions\InvalidOpenApiSpecException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
@@ -86,6 +87,9 @@ final class OpenApiSpecService
         $url = is_string($configuredUrl) ? $configuredUrl : '';
 
         try {
+            // SSRF guard: validate scheme/host BEFORE any network call (B3/B4).
+            $this->assertAllowedUrl($url);
+
             $request = Http::timeout(Config::integer('openapi.http_timeout', 8))
                 ->retry(2, 200)
                 ->acceptJson();
@@ -98,6 +102,10 @@ final class OpenApiSpecService
 
             $payload = $request->get($url)->throw()->json();
             $spec = is_array($payload) ? $payload : [];
+
+            // Anti cache-poisoning: only cache a payload that looks like an
+            // OpenAPI document (B3). Otherwise fall through to the stale copy.
+            $this->assertValidSpec($spec);
 
             Cache::put($this->cacheKey(), $spec, Config::integer('openapi.cache_ttl', 3600));
             Cache::forever($this->staleKey(), $spec);
@@ -214,45 +222,18 @@ final class OpenApiSpecService
         $endpointSet = array_flip($allowedEndpoints->values()->all());
         $usedTags = [];
 
-        // Rebuild the paths rather than mutating the untrusted nested structure.
-        $newPaths = [];
-        foreach ($this->asArray($spec['paths'] ?? null) as $rawPath => $pathItem) {
-            $path = (string) $rawPath;
-            $kept = [];
+        // Rebuild paths AND webhooks (OpenAPI 3.1) with the same rules, so a
+        // non-admin never receives ungranted webhook operations either.
+        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags);
 
-            foreach ($this->asArray($pathItem) as $key => $value) {
-                $verb = is_string($key) ? $key : '';
-
-                // Non-operation keys (parameters/summary/$ref/servers): always preserved.
-                if (! in_array($verb, self::HTTP_VERBS, true)) {
-                    $kept[$key] = $value;
-
-                    continue;
-                }
-
-                $operationTags = array_values(array_filter(
-                    $this->asArray($this->asArray($value)['tags'] ?? null),
-                    static fn (mixed $t): bool => is_string($t),
-                ));
-                $byTag = array_intersect_key($tagSet, array_flip($operationTags)) !== [];
-                $byEndpoint = isset($endpointSet[strtoupper($verb).' '.$path]);
-
-                if (! $byTag && ! $byEndpoint) {
-                    continue; // drop this operation
-                }
-
-                $kept[$key] = $value;
-                foreach ($operationTags as $name) {
-                    $usedTags[$name] = true;
-                }
-            }
-
-            // Keep the path only if at least one operation survived.
-            if (array_intersect(array_keys($kept), self::HTTP_VERBS) !== []) {
-                $newPaths[$path] = $kept;
+        if (isset($spec['webhooks'])) {
+            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags);
+            if ($webhooks === []) {
+                unset($spec['webhooks']);
+            } else {
+                $spec['webhooks'] = $webhooks;
             }
         }
-        $spec['paths'] = $newPaths;
 
         // Top-level tag cleanup.
         if (isset($spec['tags']) && is_array($spec['tags'])) {
@@ -279,13 +260,33 @@ final class OpenApiSpecService
      * Overrides the servers array (Scalar playground environment dropdown).
      *
      * @param  array<string, mixed>  $spec
-     * @param  list<array{url: string, description?: string|null}>  $servers
+     * @param  list<array<string, mixed>>  $servers
      * @return array<string, mixed>
      */
     public function injectServers(array $spec, array $servers): array
     {
-        if ($servers !== []) {
-            $spec['servers'] = $servers;
+        // Validate each entry (B7): a server needs a non-empty URL; description is
+        // optional. Malformed entries are skipped with a warning, never breaking
+        // the spec the browser receives.
+        $valid = [];
+        foreach ($servers as $server) {
+            $url = $server['url'] ?? null;
+            if (! is_string($url) || trim($url) === '') {
+                Log::warning('Skipping invalid OpenAPI server entry (missing/empty url)', ['server' => $server]);
+
+                continue;
+            }
+
+            $entry = ['url' => $url];
+            $description = $server['description'] ?? null;
+            if (is_string($description) && $description !== '') {
+                $entry['description'] = $description;
+            }
+            $valid[] = $entry;
+        }
+
+        if ($valid !== []) {
+            $spec['servers'] = $valid;
         }
 
         return $spec;
@@ -308,8 +309,19 @@ final class OpenApiSpecService
             return $spec;
         }
 
+        // Seed reachability from $refs under paths AND webhooks (path-item-level
+        // $refs are covered too — collectComponentRefs walks the whole subtree).
         $reachable = [];                                   // "schemas/Foo" => true
-        $queue = $this->collectComponentRefs($spec['paths'] ?? []);
+        $queue = [
+            ...$this->collectComponentRefs($spec['paths'] ?? []),
+            ...$this->collectComponentRefs($spec['webhooks'] ?? []),
+        ];
+
+        // securitySchemes are referenced by NAME via `security` (not by $ref), so
+        // seed them explicitly from the surviving operations + the root security.
+        foreach ($this->securitySchemeNames($spec) as $schemeName) {
+            $queue[] = 'securitySchemes/'.$schemeName;
+        }
 
         while ($queue !== []) {
             $ref = array_pop($queue);
@@ -414,6 +426,144 @@ final class OpenApiSpecService
         }
 
         return $operations;
+    }
+
+    /**
+     * Security scheme names referenced by the spec — from the root `security`
+     * and from each operation's `security` in paths + webhooks. These reference
+     * `components.securitySchemes.<name>` by name, not by $ref.
+     *
+     * @param  array<array-key, mixed>  $spec
+     * @return list<string>
+     */
+    private function securitySchemeNames(array $spec): array
+    {
+        $names = [];
+
+        $collect = function (mixed $security) use (&$names): void {
+            foreach ($this->asArray($security) as $requirement) {
+                foreach ($this->asArray($requirement) as $schemeName => $scopes) {
+                    if (is_string($schemeName)) {
+                        $names[$schemeName] = true;
+                    }
+                }
+            }
+        };
+
+        $collect($spec['security'] ?? null);
+
+        foreach (['paths', 'webhooks'] as $container) {
+            foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
+                foreach ($this->operations($pathItem) as $operation) {
+                    $collect($operation['security'] ?? null);
+                }
+            }
+        }
+
+        return array_keys($names);
+    }
+
+    /**
+     * Filters a paths-like map (paths or webhooks): drops operations not granted
+     * by tag (UNION) or by explicit "METHOD key" endpoint, preserves non-operation
+     * keys, and drops entries left with no surviving operation. Records used tags.
+     *
+     * @param  array<array-key, mixed>  $items
+     * @param  array<string, int>  $tagSet
+     * @param  array<string, int>  $endpointSet
+     * @param  array<string, true>  $usedTags  (by-ref accumulator)
+     * @return array<string, mixed>
+     */
+    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags): array
+    {
+        $result = [];
+
+        foreach ($items as $rawKey => $pathItem) {
+            $key = (string) $rawKey;
+            $kept = [];
+
+            foreach ($this->asArray($pathItem) as $field => $value) {
+                $verb = is_string($field) ? $field : '';
+
+                // Non-operation keys (parameters/summary/$ref/servers): preserved.
+                if (! in_array($verb, self::HTTP_VERBS, true)) {
+                    $kept[$field] = $value;
+
+                    continue;
+                }
+
+                $operationTags = array_values(array_filter(
+                    $this->asArray($this->asArray($value)['tags'] ?? null),
+                    static fn (mixed $t): bool => is_string($t),
+                ));
+                $byTag = array_intersect_key($tagSet, array_flip($operationTags)) !== [];
+                $byEndpoint = isset($endpointSet[strtoupper($verb).' '.$key]);
+
+                if (! $byTag && ! $byEndpoint) {
+                    continue; // drop this operation
+                }
+
+                $kept[$field] = $value;
+                foreach ($operationTags as $name) {
+                    $usedTags[$name] = true;
+                }
+            }
+
+            // Keep the entry only if at least one operation survived.
+            if (array_intersect(array_keys($kept), self::HTTP_VERBS) !== []) {
+                $result[$key] = $kept;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * SSRF guard: the upstream URL must parse, use an allowed scheme, and (when
+     * a host allow-list is configured) target an allowed host.
+     */
+    private function assertAllowedUrl(string $url): void
+    {
+        $parts = parse_url($url);
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
+            throw new InvalidOpenApiSpecException("OpenAPI upstream URL is invalid: [{$url}].");
+        }
+
+        $scheme = strtolower((string) $parts['scheme']);
+        /** @var list<string> $schemes */
+        $schemes = config('openapi.allowed_schemes', ['https']);
+        if (! in_array($scheme, array_map('strtolower', $schemes), true)) {
+            throw new InvalidOpenApiSpecException("OpenAPI upstream scheme [{$scheme}] is not allowed.");
+        }
+
+        $host = strtolower((string) $parts['host']);
+        /** @var list<string> $hosts */
+        $hosts = config('openapi.allowed_hosts', []);
+        if ($hosts !== [] && ! in_array($host, array_map('strtolower', $hosts), true)) {
+            throw new InvalidOpenApiSpecException("OpenAPI upstream host [{$host}] is not allowed.");
+        }
+    }
+
+    /**
+     * Anti cache-poisoning: a usable spec must declare `openapi` (string) +
+     * `info` (object) and expose at least one operation container
+     * (`paths`/`webhooks`/`components`). Anything else is not cached.
+     *
+     * @param  array<array-key, mixed>  $spec
+     */
+    private function assertValidSpec(array $spec): void
+    {
+        $hasVersion = isset($spec['openapi']) && is_string($spec['openapi']) && $spec['openapi'] !== '';
+        $hasInfo = isset($spec['info']) && is_array($spec['info']);
+        $hasContainer = is_array($spec['paths'] ?? null)
+            || is_array($spec['webhooks'] ?? null)
+            || is_array($spec['components'] ?? null);
+
+        if (! $hasVersion || ! $hasInfo || ! $hasContainer) {
+            throw new InvalidOpenApiSpecException(
+                'Upstream payload is not a valid OpenAPI document (missing openapi/info or any paths/webhooks/components).'
+            );
+        }
     }
 
     /**
