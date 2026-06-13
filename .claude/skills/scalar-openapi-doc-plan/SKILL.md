@@ -32,3 +32,4 @@ Per subtask: write code + guardrails (Pest / Vitest / Playwright-if-UI) → loca
 - Both bots evaluate file existence against the **PR base / merge-base**, so files *added by the PR* get flagged as "missing." On a subtask PR into a fresh macro branch these are false positives — verify with `git diff --name-status <base>...HEAD`, then resolve the threads.
 - `copilot --autopilot --yolo` **edits and commits files** unless the prompt says "report findings only".
 - Windows/Herd: PowerShell parse errors abort the *entire* chained command before anything runs — verify pushes landed (`git rev-parse origin/<branch>`).
+- On Windows, Claude Code's **PowerShell** tool is a separate permission namespace from **Bash** — `.claude/settings.json` mirrors every rule under both so the allowlist and force-push/`.env` guards actually apply to the shell in use.
