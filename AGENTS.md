@@ -64,11 +64,11 @@ Definition of Done for every subtask:
    gh pr edit <PR> --add-reviewer copilot
    gh api repos/padosoft/scalar-openapi-doc/pulls/<PR>/requested_reviewers
    ```
-   Fallback when the token lacks scopes (`--add-reviewer copilot` fails — use the PR node ID shown by `gh pr view <PR> --json id`):
+   Fallback when the token lacks scopes (`--add-reviewer copilot` fails — use the PR node ID from `gh pr view <PR> --json id -q .id`, format `PR_kwDO...`):
    ```
-   gh api graphql -f query='mutation($pr: ID!, $login: String!) { requestReviews(input: {pullRequestId: $pr, userIds: [], union: true}) { clientMutationId } }' -F pr='<PR_NODE_ID>'
+   gh api graphql -f query='mutation RequestReviewsByLogin($pullRequestId: ID!, $botLogins: [String!], $union: Boolean!) { requestReviewsByLogin(input: {pullRequestId: $pullRequestId, botLogins: $botLogins, union: $union}) { clientMutationId } }' -F pullRequestId='<PR_NODE_ID>' -F botLogins[]='copilot-pull-request-reviewer[bot]' -F union=true
    ```
-   > **Note:** the GraphQL approach for bot reviewers requires the PR node ID (format `PR_kwDO...`). Obtain it with `gh pr view <PR> --json id -q .id`. The correct public-API mutation is `requestReviews` with `userIds`; adding the Copilot bot by its user node ID is the supported path if `gh pr edit --add-reviewer` is unavailable.
+   > **Note:** `requestReviewsByLogin` is not in the public GraphQL schema docs but is the proven working path for bot reviewers (verified in padosoft/product_image_discovery_admin). Always verify with the `requested_reviewers` call above that the review actually started; if the mutation errors, fall back to requesting the review from the GitHub PR web UI and record the blocker in `docs/PROGRESS.md`.
 6. Wait for **both** CI fully green **and** Copilot review comments. Fix broken tests and every Copilot comment, push again, then re-request a fresh Copilot review with the same commands from step 5, and repeat the loop.
 7. Only when CI is green and all review threads are resolved: **merge** the PR, update `docs/PROGRESS.md` (and `docs/LESSON.md` for anything learned), then move to the next subtask.
 
