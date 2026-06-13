@@ -1,0 +1,108 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Demo API", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com" }],
+  "tags": [
+    { "name": "Orders" },
+    { "name": "Products" },
+    { "name": "Users" }
+  ],
+  "paths": {
+    "/orders": {
+      "get": {
+        "tags": ["Orders"],
+        "summary": "List orders",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Order" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Orders"],
+        "summary": "Create order",
+        "responses": { "201": { "description": "created" } }
+      }
+    },
+    "/orders/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "tags": ["Orders"],
+        "summary": "Get order",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Order" } }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Orders"],
+        "summary": "Delete order",
+        "responses": { "204": { "description": "no content" } }
+      }
+    },
+    "/products": {
+      "get": {
+        "tags": ["Products"],
+        "summary": "List products",
+        "responses": { "200": { "description": "ok" } }
+      },
+      "post": {
+        "tags": ["Products"],
+        "summary": "Create product",
+        "responses": { "201": { "description": "created" } }
+      }
+    },
+    "/products/{id}": {
+      "get": {
+        "tags": ["Products"],
+        "summary": "Get product",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Product" } }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Healthcheck",
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "error": { "$ref": "#/components/schemas/Error" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": { "id": { "type": "string" } }
+      },
+      "Error": {
+        "type": "object",
+        "properties": { "message": { "type": "string" } }
+      },
+      "Legacy": {
+        "type": "object",
+        "properties": { "old": { "type": "boolean" } }
+      }
+    }
+  }
+}
