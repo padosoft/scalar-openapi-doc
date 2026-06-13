@@ -30,7 +30,8 @@ Branch: `task/project-conventions-1-1-agents` → PR #1 into `task/project-conve
 - Opened PR #1. `gh pr edit --add-reviewer copilot` failed → used GraphQL `requestReviewsByLogin` fallback (works). Confirmed Copilot in requested_reviewers.
 - **Both Copilot and the repo's Codex connector auto-reviewed.** Findings converged: docs referenced `docs/*` files and `.gitattributes` that didn't exist yet; one hardcoded Windows user path.
 - **Decision:** folded subtask 1.2 (docs) into this PR to make the contract self-consistent rather than littering "(forthcoming)" notes. Added `docs/PLAN.md`, `docs/RULES.md`, `docs/PROGRESS.md`, `docs/LESSON.md`, `.gitattributes`; generalized the Herd path in AGENTS.md.
-- Next: re-run local review on the expanded diff → push → wait CI + bot reviews resolved → merge.
+- Local review (pass 3 — report-only) found one gap: AGENTS.md step 6 only mentioned Copilot, not Codex. Fixed: step 6 now explicitly names both bots as equally binding and instructs nudging Codex with `@codex review`.
+- Next: push updated diff → wait CI + both bot reviews resolved → merge.
 
 ### Subtask 1.3 — resume skill (.claude)
 - Pending: `.claude/skills/scalar-openapi-doc-plan/SKILL.md` + `.claude/settings.json` allowlist.
