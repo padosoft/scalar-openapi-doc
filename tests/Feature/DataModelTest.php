@@ -97,7 +97,7 @@ class DataModelTest extends TestCase
         $user = User::factory()->create();
         UserAllowedEndpoint::create(['user_id' => $user->id, 'method' => HttpVerb::Get, 'path' => '/items']);
 
-        $endpoint = UserAllowedEndpoint::query()->where('user_id', $user->id)->first();
+        $endpoint = UserAllowedEndpoint::query()->where('user_id', $user->id)->firstOrFail();
 
         $this->assertInstanceOf(HttpVerb::class, $endpoint->method);
         $this->assertSame(HttpVerb::Get, $endpoint->method);

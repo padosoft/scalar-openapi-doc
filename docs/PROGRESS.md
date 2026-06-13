@@ -88,7 +88,7 @@ Branch: `task/rbac-data-model-3-2-models`
 - `DataModelTest` (9 tests): unique constraints, cascade, SET NULL, casts, HttpVerb cast, values(), HasMany relations.
 - **Copilot review loop (3 rounds):** all 6 findings fixed — phantom `app/Enums/Enums/HttpVerb.php` deleted, HttpVerb cast added to UserAllowedEndpoint, redundant `index('user_id')` removed from grant migrations, auth_logs.created_at NOT NULL + useCurrent(), TRACE added to HttpVerb, auth_logs.email widened to 255, utf8mb4_bin collation on tag/path for MySQL (guarded with `DB::getDriverName()` for SQLite compat).
 - All gates green: Pest 52/52, Pint clean, PHPStan max (0 errors), final review → NO FINDINGS.
-- **Status:** 🟡 in progress — PR not yet opened.
+- **Status:** 🟡 in review — PR #10 into `task/rbac-data-model`.
 
 ## T4 — task/openapi-service
 _Not started._
