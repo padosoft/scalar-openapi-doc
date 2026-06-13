@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Auth;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Route;
 use Laravel\Fortify\Features;
 use Tests\TestCase;
 
@@ -12,30 +13,30 @@ class RegistrationTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected function setUp(): void
+    public function test_self_registration_is_disabled(): void
     {
-        parent::setUp();
-
-        $this->skipUnlessFortifyHas(Features::registration());
+        // Users are admin-provisioned; the registration feature must stay off.
+        $this->assertFalse(Features::enabled(Features::registration()));
     }
 
-    public function test_registration_screen_can_be_rendered()
+    public function test_registration_routes_are_not_registered(): void
     {
-        $response = $this->get(route('register'));
-
-        $response->assertOk();
+        $this->assertFalse(Route::has('register'));
+        $this->assertFalse(Route::has('register.store'));
     }
 
-    public function test_new_users_can_register()
+    public function test_registration_endpoint_is_unavailable(): void
     {
-        $response = $this->post(route('register.store'), [
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        // The POST handler does not exist when registration is disabled.
+        $response = $this->post('/register', [
+            'name' => 'Intruder',
+            'email' => 'intruder@example.com',
             'password' => 'password',
             'password_confirmation' => 'password',
         ]);
 
-        $this->assertAuthenticated();
-        $response->assertRedirect(route('dashboard', absolute: false));
+        $this->assertContains($response->getStatusCode(), [404, 405]);
+        $this->assertGuest();
+        $this->assertDatabaseMissing('users', ['email' => 'intruder@example.com']);
     }
 }
