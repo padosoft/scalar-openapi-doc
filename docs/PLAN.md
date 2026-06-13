@@ -40,7 +40,7 @@ Da fixare come subtask espliciti (riferimenti a `OpenApiSpecService.php` skeleto
 - **Definition of Done di ogni subtask:**
   1. Obiettivo preciso + dettagli implementativi + guardrail: **Pest** (PHP), **Vitest** (JS), **Playwright** per ogni interazione UI/UX (skip se solo backend).
   2. Loop locale: tutti i test verdi + `pint --test` + Larastan max puliti → **review Copilot locale**: `copilot --autopilot --yolo -p "/review <diff branch vs origin/main>"` passando il diff completo del branch (se troppo grande → salvarlo su file temp e passare il file) → ripetere fino a **zero commenti**.
-  3. Push → apertura PR (gh CLI) → **aggiungere Copilot come reviewer** (`gh pr edit <PR> --add-reviewer @copilot`; fallback GraphQL `requestReviewsByLogin` con `copilot-pull-request-reviewer[bot]` se il token non basta) → verificare che la review sia partita.
+  3. Push → apertura PR (gh CLI) → **aggiungere Copilot come reviewer** (`gh pr edit <PR> --add-reviewer copilot`; in pratica fallisce su questo repo → usare il fallback GraphQL `requestReviewsByLogin` con `copilot-pull-request-reviewer[bot]`, vedi AGENTS.md) → verificare che la review sia partita.
   4. Attendere **CI tutta verde** + commenti Copilot → fixare test rotti e commenti → ri-push e nuova review in loop.
   5. Solo con tutto ok: **merge** e avanti col task successivo.
 - `docs/PROGRESS.md` aggiornato ad ogni step (così una sessione interrotta riparte esattamente da dov'era); `docs/LESSON.md` aggiornato ad ogni scoperta/fix da Copilot. Entrambi passati nel contesto di ogni subagent e riletti a inizio sessione.

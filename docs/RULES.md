@@ -71,8 +71,8 @@ A subtask is **done** only when all of the following hold:
 - Playwright: <scenarios>   (or N/A — backend only)
 
 ### Gates
-- [ ] pint --test
-- [ ] phpstan --level=max
+- [ ] vendor/bin/pint --test
+- [ ] vendor/bin/phpstan analyse --level=max
 - [ ] php artisan test
 - [ ] npm run test
 - [ ] npm run build
