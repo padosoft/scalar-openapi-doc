@@ -6,7 +6,7 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 
 | # | Macro task | Branch | Status | Macro PR |
 |---|---|---|---|---|
-| T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟡 in progress | — |
+| T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟡 in progress (1.1+1.2 merged, 1.3 in PR) | — |
 | T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | ⚪ pending | — |
 | T3 | RBAC & data model | `task/rbac-data-model` | ⚪ pending | — |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | ⚪ pending | — |
@@ -31,10 +31,16 @@ Branch: `task/project-conventions-1-1-agents` → PR #1 into `task/project-conve
 - **Both Copilot and the repo's Codex connector auto-reviewed.** Findings converged: docs referenced `docs/*` files and `.gitattributes` that didn't exist yet; one hardcoded Windows user path.
 - **Decision:** folded subtask 1.2 (docs) into this PR to make the contract self-consistent rather than littering "(forthcoming)" notes. Added `docs/PLAN.md`, `docs/RULES.md`, `docs/PROGRESS.md`, `docs/LESSON.md`, `.gitattributes`; generalized the Herd path in AGENTS.md.
 - Local review (pass 3 — report-only) found one gap: AGENTS.md step 6 only mentioned Copilot, not Codex. Fixed: step 6 now explicitly names both bots as equally binding and instructs nudging Codex with `@codex review`.
-- Next: push updated diff → wait CI + both bot reviews resolved → merge.
+- **Outcome:** squash-merged into `task/project-conventions` as commit `1a504a4` (see "Resolution of PR #1" below for the full review-loop details).
 
 ### Subtask 1.3 — resume skill (.claude)
-- Pending: `.claude/skills/scalar-openapi-doc-plan/SKILL.md` + `.claude/settings.json` allowlist.
+Branch: `task/project-conventions-1-3-skill` → PR into `task/project-conventions`.
+
+- Added `.claude/skills/scalar-openapi-doc-plan/SKILL.md` (resume skill: read order AGENTS.md → RULES.md → PROGRESS.md → LESSON.md; how-to-resume; loop summary; project gotchas) and `.claude/settings.json` (command allowlist for git/gh/composer/php artisan/npm/playwright/copilot; deny force-push/hard-reset/.env reads).
+- Recorded the review false-positive root cause in `docs/LESSON.md` (bots check existence vs PR base/merge-base) + thread-resolution + loop-termination lessons.
+
+### Resolution of PR #1 (1.1+1.2)
+- Ran 4 review rounds. Real findings fixed each round (review base, report-only command, machine paths, both-bots-binding, English PLAN.md, branch example, GraphQL quoting, inlined ADR intent, typo). Remaining threads were provably false positives (files added by the PR reported as "missing" — bots evaluate vs base). Resolved all threads via GraphQL with a proof comment; squash-merged into `task/project-conventions` as commit `1a504a4`.
 
 ---
 
