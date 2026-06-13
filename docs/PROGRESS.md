@@ -7,7 +7,7 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | # | Macro task | Branch | Status | Macro PR |
 |---|---|---|---|---|
 | T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟢 merged (PR #3 → `main`, `691db58`) | #3 |
-| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟡 in progress (2.1 scaffold) | — |
+| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟡 macro PR pending → `main` (2.1+2.2+2.3 merged) | — |
 | T3 | RBAC & data model | `task/rbac-data-model` | ⚪ pending | — |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | ⚪ pending | — |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | ⚪ pending | — |
@@ -61,8 +61,20 @@ Bot findings on PR #4 mostly target **pristine starter-kit files** (out of scope
 - **T8 (security pass):** consider hardening pristine starter code if we keep it — `app/Http/Middleware/HandleAppearance.php` appearance cookie (validate against allowlist + JSON-encode in `app.blade.php` inline script); `passkey-register.tsx` reads `navigator` in render (SSR-unsafe if SSR enabled).
 - **Not-actionable / rejected:** `password-input.tsx` forwardRef — false positive under **React 19** (`ref` is a normal prop). `User.php` `MustVerifyEmail` — deliberately omitted: users are **admin-provisioned** (no self-registration), so email verification is not part of this product. `tests/Pest.php` placeholder helper — starter artifact, harmless; remove if it ever collides.
 
+### Subtask 2.2 — quality tooling (merged, PR #5)
+- PHPStan → **level max** + `phpstan-baseline.neon` (17 starter findings grandfathered) + `composer types:check` runs `--memory-limit=1G`.
+- **Vitest** (`vitest.config.ts` jsdom + `@` alias via `import.meta.url` + `pool: forks`; `vitest.setup.ts`; sample tests; jest-dom type decl) → `npm run test` 6 green.
+- **Playwright** (`playwright.config.ts` webServer `php artisan serve`; login smoke) → `npm run e2e` green.
+- Regenerated `package-lock.json` for the `@emnapi/*` peers (Codex). `phpunit.xml` already SQLite+array — unchanged.
+
+### Subtask 2.3 — CI (merged, PR #6)
+- Workflows trigger on `pull_request` for `task/**` (push only on main/master/develop) + `concurrency`; `lint.yml` `contents: read` + Node 22 + check-mode (`lint:check`/`format:check`) + `wayfinder:generate --with-form`.
+- `tests.yml` → 3 jobs: **php** (matrix 8.4/8.5: PHPStan max + Pest), **frontend** (PHP+Node, wayfinder, tsc + Vitest + build), **e2e** (`needs: [php, frontend]`, Playwright on SQLite + array + DB session).
+- **CI fixes (false-green locally, red on clean CI):** `npm install` not `npm ci` (Windows lock on Linux); `withoutVite()` in `TestCase` (Pest needs no Vite manifest); `wayfinder:generate --with-form` before tsc/eslint (gitignored generated modules); PHP `^8.4` + matrix 8.4/8.5 (Symfony 8.1 needs ≥8.4.1). All in `docs/LESSON.md`.
+- **All CI jobs green.** Merged into `task/bootstrap`.
+
 ## T3 — task/rbac-data-model
-_Not started._
+_Not started. Seeder skeletons reviewed: `RoleSeeder` (spatie `Role::findOrCreate` admin/user, guard `web`), `AdminUserSeeder` (`firstOrCreate` by `ADMIN_EMAIL`, assignRole admin — note: uses `env()` directly, route via config or read at runtime since `env()` returns null when config is cached), `DatabaseSeeder` (calls Role then AdminUser)._
 
 ## T4 — task/openapi-service
 _Not started._
