@@ -6,13 +6,17 @@ on:
       - main
       - master
       - develop
-      - 'task/**'
   pull_request:
     branches:
       - main
       - master
       - develop
       - 'task/**'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -69,7 +73,7 @@ jobs:
           node-version: '22'
 
       - name: Install Node dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Type-check (tsc)
         run: npm run types:check
@@ -117,7 +121,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
       - name: Install Node dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Copy environment file
         run: cp .env.example .env
