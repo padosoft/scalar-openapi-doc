@@ -1,0 +1,103 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Cannot access property \$email_verified_at on App\\Models\\User\|null\.$#'
+			identifier: property.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/ProfileController.php
+
+		-
+			message: '#^Cannot call method delete\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/ProfileController.php
+
+		-
+			message: '#^Cannot call method fill\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/ProfileController.php
+
+		-
+			message: '#^Cannot call method isDirty\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/ProfileController.php
+
+		-
+			message: '#^Cannot call method save\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/ProfileController.php
+
+		-
+			message: '#^Cannot call method diffForHumans\(\) on Illuminate\\Support\\Carbon\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/SecurityController.php
+
+		-
+			message: '#^Cannot call method hasEnabledTwoFactorAuthentication\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/SecurityController.php
+
+		-
+			message: '#^Cannot call method passkeys\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/SecurityController.php
+
+		-
+			message: '#^Cannot call method toPasswordRulesString\(\) on Illuminate\\Validation\\Rules\\Password\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/SecurityController.php
+
+		-
+			message: '#^Cannot call method update\(\) on App\\Models\\User\|null\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: app/Http/Controllers/Settings/SecurityController.php
+
+		-
+			message: '#^Cannot access property \$id on App\\Models\\User\|null\.$#'
+			identifier: property.nonObject
+			count: 1
+			path: app/Http/Requests/Settings/ProfileUpdateRequest.php
+
+		-
+			message: '#^Binary operation "\." between mixed and ''\|'' results in an error\.$#'
+			identifier: binaryOp.invalid
+			count: 1
+			path: app/Providers/FortifyServiceProvider.php
+
+		-
+			message: '#^Cannot call method toPasswordRulesString\(\) on Illuminate\\Validation\\Rules\\Password\|null\.$#'
+			identifier: method.nonObject
+			count: 2
+			path: app/Providers/FortifyServiceProvider.php
+
+		-
+			message: '#^Parameter \#1 \$value of static method Illuminate\\Support\\Str\:\:lower\(\) expects string, mixed given\.$#'
+			identifier: argument.type
+			count: 1
+			path: app/Providers/FortifyServiceProvider.php
+
+		-
+			message: '#^Parameter \#1 \$url of function parse_url expects string, mixed given\.$#'
+			identifier: argument.type
+			count: 1
+			path: config/fortify.php
+
+		-
+			message: '#^Cannot call method name\(\) on mixed\.$#'
+			identifier: method.nonObject
+			count: 1
+			path: routes/settings.php
+
+		-
+			message: '#^Cannot call method name\(\) on mixed\.$#'
+			identifier: method.nonObject
+			count: 2
+			path: routes/web.php
