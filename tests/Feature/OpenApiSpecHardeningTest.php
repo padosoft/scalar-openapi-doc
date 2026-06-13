@@ -177,6 +177,21 @@ class OpenApiSpecHardeningTest extends TestCase
             ->toContain('OrderEvent')->toContain('Orphan')->toContain('WebhookPayload');
     }
 
+    // ---- metadata includes webhooks (grant UI consistency) ----------------
+
+    public function test_extract_tags_includes_webhook_tags(): void
+    {
+        // The 3.1 fixture's "Webhooks" tag exists only on a webhook operation.
+        expect($this->service()->extractTags($this->spec31()))->toContain('Webhooks')->toContain('Orders');
+    }
+
+    public function test_extract_endpoints_includes_webhook_operations(): void
+    {
+        $labels = collect($this->service()->extractEndpoints($this->spec31()))->pluck('label')->all();
+
+        expect($labels)->toContain('GET /secure')->toContain('POST newOrder');
+    }
+
     // ---- B7: injectServers validation -------------------------------------
 
     public function test_inject_servers_skips_malformed_entries(): void

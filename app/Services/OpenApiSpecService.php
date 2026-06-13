@@ -92,6 +92,10 @@ final class OpenApiSpecService
 
             $request = Http::timeout(Config::integer('openapi.http_timeout', 8))
                 ->retry(2, 200)
+                // Don't follow redirects: the SSRF allow-list is checked on the
+                // configured URL only, so a redirect could escape it. The upstream
+                // must serve the spec directly.
+                ->withoutRedirecting()
                 ->acceptJson();
 
             // Optional authentication header towards the external OpenAPI server.
@@ -150,11 +154,15 @@ final class OpenApiSpecService
             }
         }
 
-        foreach ($this->asArray($spec['paths'] ?? null) as $pathItem) {
-            foreach ($this->operations($pathItem) as $operation) {
-                foreach ($this->asArray($operation['tags'] ?? null) as $name) {
-                    if (is_string($name)) {
-                        $tags[$name] = true;
+        // Tags from operations under both paths and webhooks (3.1), so a
+        // webhook-only tag is still offered in the admin grant UI.
+        foreach (['paths', 'webhooks'] as $container) {
+            foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
+                foreach ($this->operations($pathItem) as $operation) {
+                    foreach ($this->asArray($operation['tags'] ?? null) as $name) {
+                        if (is_string($name)) {
+                            $tags[$name] = true;
+                        }
                     }
                 }
             }
@@ -176,17 +184,21 @@ final class OpenApiSpecService
     {
         $endpoints = [];
 
-        foreach ($this->asArray($spec['paths'] ?? null) as $path => $pathItem) {
-            $path = (string) $path;
-            foreach ($this->operations($pathItem) as $method => $operation) {
-                $upper = strtoupper($method);
-                $summary = $operation['summary'] ?? null;
-                $endpoints[] = [
-                    'method' => $upper,
-                    'path' => $path,
-                    'label' => $upper.' '.$path,
-                    'summary' => is_string($summary) ? $summary : null,
-                ];
+        // Endpoints from both paths and webhooks (a webhook's key is used as its
+        // "path", matching how filterForUser resolves "METHOD key" grants).
+        foreach (['paths', 'webhooks'] as $container) {
+            foreach ($this->asArray($spec[$container] ?? null) as $path => $pathItem) {
+                $path = (string) $path;
+                foreach ($this->operations($pathItem) as $method => $operation) {
+                    $upper = strtoupper($method);
+                    $summary = $operation['summary'] ?? null;
+                    $endpoints[] = [
+                        'method' => $upper,
+                        'path' => $path,
+                        'label' => $upper.' '.$path,
+                        'summary' => is_string($summary) ? $summary : null,
+                    ];
+                }
             }
         }
 
