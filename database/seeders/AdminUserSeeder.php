@@ -23,7 +23,9 @@ final class AdminUserSeeder extends Seeder
     public function run(): void
     {
         $email = $this->stringConfig('openapi.admin_user.email');
-        $password = $this->stringConfig('openapi.admin_user.password', allowEmpty: true);
+        // Trim so surrounding whitespace can't smuggle a default/empty password
+        // past the production guard (e.g. " change-me ").
+        $password = trim($this->stringConfig('openapi.admin_user.password', allowEmpty: true));
         $name = $this->stringConfig('openapi.admin_user.name');
         $adminRole = $this->stringConfig('openapi.admin_role');
 

@@ -12,3 +12,8 @@ parameters:
         - routes/
 
     level: max
+
+    # Vendor-published migration (spatie/laravel-permission). We don't maintain
+    # its source; excluding it keeps the baseline free of vendor-stub noise.
+    excludePaths:
+        - database/migrations/*_create_permission_tables.php

@@ -16,7 +16,7 @@ return [
     |
     */
 
-    'admin_role' => env('OPENAPI_ADMIN_ROLE', 'admin'),
+    'admin_role' => trim((string) env('OPENAPI_ADMIN_ROLE', 'admin')) ?: 'admin',
 
     'viewer_roles' => array_values(array_filter(array_map(
         'trim',
