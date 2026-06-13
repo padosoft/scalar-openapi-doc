@@ -48,12 +48,15 @@ Definition of Done for every subtask:
    npm run build
    npx playwright test
    ```
-3. Local Copilot review loop — zero comments required before push:
+3. Local Copilot review loop — zero comments required before push. **Diff against the PR base, not always `origin/main`:** for a subtask branch the base is the macro branch (`origin/task/<macro-name>`); only the macro PR diffs against `origin/main`. This keeps the review focused on the changes this PR actually introduces.
    ```
-   git diff origin/main...HEAD > $env:TEMP\pr-diff.txt
-   copilot --autopilot --yolo -p "/review review the attached diff of my branch vs origin/main: $env:TEMP\pr-diff.txt"
+   # subtask branch (base = macro branch):
+   git diff origin/task/<macro-name>...HEAD > $env:TEMP\pr-diff.txt
+   # macro branch PR (base = main):
+   # git diff origin/main...HEAD > $env:TEMP\pr-diff.txt
+   copilot --autopilot --yolo -p "/review Review the attached diff (branch vs PR base) at $env:TEMP\pr-diff.txt. DO NOT modify or commit any files - report findings only. Reply 'NO FINDINGS' if clean."
    ```
-   Pass the **full branch diff vs origin/main** (not just unstaged files). If the diff is small it can be inlined in the prompt; otherwise always go through the temp file. Fix every finding, re-run gates, re-review, until the review returns zero actionable comments.
+   Pass the **full branch diff vs the PR base** (not just unstaged files). The review prompt MUST say "report findings only": `--autopilot --yolo` grants all tools and *will edit and commit files* otherwise (see `docs/LESSON.md`). If a finding is real, you apply the fix yourself and re-review; never let the review tool mutate the branch behind the gate. Fix every finding, re-run gates, re-review, until the review returns zero actionable comments.
 4. Push and open the PR with `gh`:
    ```
    git push -u origin <subtask-branch>
