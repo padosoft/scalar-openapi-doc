@@ -249,6 +249,57 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and(array_keys($byWebhook['webhooks']))->toBe(['/orders']);
     }
 
+    // ---- B4: path-item $ref reuse (OpenAPI 3.1 components.pathItems) -------
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function specWithPathItemRef(): array
+    {
+        return [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/reused' => ['$ref' => '#/components/pathItems/Reused']],
+            'components' => [
+                'pathItems' => [
+                    'Reused' => [
+                        'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+                        'delete' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    public function test_resolves_path_item_ref_and_filters_inlined_operations(): void
+    {
+        // Granting only "Orders" keeps the referenced GET (inlined) and drops the
+        // "Admin" DELETE — the $ref entry no longer silently vanishes.
+        $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/reused'])
+            ->and($filtered['paths']['/reused'])->toHaveKey('get')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('delete')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('$ref');
+    }
+
+    public function test_path_item_ref_operations_are_grantable_by_endpoint(): void
+    {
+        $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect([]), collect(['GET /reused']));
+
+        expect(array_keys($filtered['paths']))->toBe(['/reused'])
+            ->and($filtered['paths']['/reused'])->toHaveKey('get');
+    }
+
+    public function test_metadata_includes_referenced_path_item_operations(): void
+    {
+        $spec = $this->specWithPathItemRef();
+
+        expect($this->service()->extractTags($spec))->toContain('Orders')->toContain('Admin')
+            ->and(collect($this->service()->extractEndpoints($spec))->pluck('label')->all())
+            ->toContain('GET /reused')->toContain('DELETE /reused');
+    }
+
     // ---- B7: injectServers validation -------------------------------------
 
     public function test_inject_servers_skips_malformed_entries(): void
