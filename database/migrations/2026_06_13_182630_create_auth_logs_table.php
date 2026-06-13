@@ -20,7 +20,9 @@ return new class extends Migration
             $table->string('ip_address', 45)->nullable(); // IPv6-capable
             $table->string('user_agent', 512)->nullable();
             // Audit rows are immutable: created_at only, no updated_at.
-            $table->timestamp('created_at')->nullable();
+            // NOT NULL with DB default ensures every audit row has a timestamp even if
+            // the insert bypasses Eloquent's timestamping.
+            $table->timestamp('created_at')->useCurrent();
 
             $table->index('user_id');
             $table->index('event');

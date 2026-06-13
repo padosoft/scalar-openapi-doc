@@ -17,6 +17,7 @@ enum HttpVerb: string
     case Delete = 'DELETE';
     case Head = 'HEAD';
     case Options = 'OPTIONS';
+    case Trace = 'TRACE';
 
     /**
      * Verb values as a list, for validation rules.

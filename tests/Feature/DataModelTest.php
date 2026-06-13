@@ -104,11 +104,11 @@ class DataModelTest extends TestCase
         $this->assertSame('GET', $endpoint->method->value);
     }
 
-    public function test_http_verb_values_returns_all_seven_verbs(): void
+    public function test_http_verb_values_returns_all_eight_verbs(): void
     {
         $values = HttpVerb::values();
 
-        $this->assertCount(7, $values);
+        $this->assertCount(8, $values);
         $this->assertContains('GET', $values);
         $this->assertContains('POST', $values);
         $this->assertContains('PUT', $values);
@@ -116,6 +116,7 @@ class DataModelTest extends TestCase
         $this->assertContains('DELETE', $values);
         $this->assertContains('HEAD', $values);
         $this->assertContains('OPTIONS', $values);
+        $this->assertContains('TRACE', $values);
     }
 
     public function test_user_has_many_relations_return_correct_types(): void

@@ -18,7 +18,7 @@ use Illuminate\Support\Carbon;
  * @property AuthEvent $event
  * @property string|null $ip_address
  * @property string|null $user_agent
- * @property Carbon|null $created_at
+ * @property Carbon $created_at
  */
 class AuthLog extends Model
 {
