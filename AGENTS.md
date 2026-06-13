@@ -34,7 +34,7 @@ Every agent (main session or subagent) MUST read this file, `docs/RULES.md`, `do
 
 ## Branch & PR Loop (mandatory, per subtask)
 
-One branch per macro task: `task/<macro-name>` (created from `main`, pushed immediately). Each subtask is a child branch `task/<macro-name>-<n-n-slug>` and gets a PR **into the macro branch**. When the macro task is complete, open the macro PR `task/<macro-name>` → `main` and run the same validation loop.
+One branch per macro task: `task/<macro-name>` (created from `main`, pushed immediately). Each subtask is a child branch `task/<macro-name>-<n-n-slug>` (where `<n-n>` is macro-number–subtask-number, e.g. `task/t1-1-1-auth-model`) and gets a PR **into the macro branch**. When the macro task is complete, open the macro PR `task/<macro-name>` → `main` and run the same validation loop.
 
 Definition of Done for every subtask:
 
@@ -42,7 +42,7 @@ Definition of Done for every subtask:
 2. Local gates all green (run the relevant subset):
    ```
    vendor/bin/pint --test
-   vendor/bin/phpstan analyse
+   vendor/bin/phpstan analyse --level=max
    php artisan test
    npm run test
    npm run build
@@ -50,8 +50,8 @@ Definition of Done for every subtask:
    ```
 3. Local Copilot review loop — zero comments required before push:
    ```
-   git diff origin/main...HEAD > %TEMP%\pr-diff.txt
-   copilot --autopilot --yolo -p "/review review the attached diff of my branch vs origin/main: %TEMP%\pr-diff.txt"
+   git diff origin/main...HEAD > $env:TEMP\pr-diff.txt
+   copilot --autopilot --yolo -p "/review review the attached diff of my branch vs origin/main: $env:TEMP\pr-diff.txt"
    ```
    Pass the **full branch diff vs origin/main** (not just unstaged files). If the diff is small it can be inlined in the prompt; otherwise always go through the temp file. Fix every finding, re-run gates, re-review, until the review returns zero actionable comments.
 4. Push and open the PR with `gh`:
@@ -61,14 +61,15 @@ Definition of Done for every subtask:
    ```
 5. Add GitHub Copilot as reviewer and verify the review actually started:
    ```
-   gh pr edit <PR> --add-reviewer @copilot
+   gh pr edit <PR> --add-reviewer copilot
    gh api repos/padosoft/scalar-openapi-doc/pulls/<PR>/requested_reviewers
    ```
-   Fallback when the token lacks scopes (`--add-reviewer @copilot` fails):
+   Fallback when the token lacks scopes (`--add-reviewer copilot` fails — use the PR node ID shown by `gh pr view <PR> --json id`):
    ```
-   gh api graphql -f query='mutation($pr: ID!) { requestReviewsByLogin(input: {pullRequestId: $pr, botLogins: ["copilot-pull-request-reviewer[bot]"], union: true}) { clientMutationId } }' -F pr='<PR_NODE_ID>'
+   gh api graphql -f query='mutation($pr: ID!, $login: String!) { requestReviews(input: {pullRequestId: $pr, userIds: [], union: true}) { clientMutationId } }' -F pr='<PR_NODE_ID>'
    ```
-6. Wait for **both** CI fully green **and** Copilot review comments. Fix broken tests and every Copilot comment, push again, request a fresh Copilot review, and repeat the loop.
+   > **Note:** the GraphQL approach for bot reviewers requires the PR node ID (format `PR_kwDO...`). Obtain it with `gh pr view <PR> --json id -q .id`. The correct public-API mutation is `requestReviews` with `userIds`; adding the Copilot bot by its user node ID is the supported path if `gh pr edit --add-reviewer` is unavailable.
+6. Wait for **both** CI fully green **and** Copilot review comments. Fix broken tests and every Copilot comment, push again, then re-request a fresh Copilot review with the same commands from step 5, and repeat the loop.
 7. Only when CI is green and all review threads are resolved: **merge** the PR, update `docs/PROGRESS.md` (and `docs/LESSON.md` for anything learned), then move to the next subtask.
 
 Never skip a gate silently. If a tool is unavailable (Copilot quota, CI outage, network), record the exact blocker in `docs/PROGRESS.md` and stop or ask the user — do not pretend the gate passed.

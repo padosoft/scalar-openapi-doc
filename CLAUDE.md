@@ -22,7 +22,7 @@
 
 ```
 vendor/bin/pint --test
-vendor/bin/phpstan analyse
+vendor/bin/phpstan analyse --level=max
 php artisan test
 npm run test
 npm run build
@@ -31,4 +31,4 @@ npx playwright test
 
 ## Workflow (summary — full version in AGENTS.md)
 
-Macro task = branch `task/<name>`; subtask = child branch + PR into macro branch; local gates green → local `copilot --autopilot --yolo -p "/review ..."` with zero comments → push → PR → add `@copilot` reviewer → CI green + comments resolved → merge. Macro done → PR to `main`, same loop.
+Macro task = branch `task/<name>`; subtask = child branch + PR into macro branch; local gates green → local `copilot --autopilot --yolo -p "/review ..."` with zero comments → push → PR → add `copilot` reviewer → CI green + comments resolved → merge. Macro done → PR to `main`, same loop.
