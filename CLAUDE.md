@@ -16,7 +16,7 @@
 - `docs/LESSON.md` — lessons learned (update on every discovery / Copilot fix).
 - `docs/RULES.md` — coding standards + subtask Definition-of-Done template.
 - `app/Services/OpenApiSpecService.php` — security core (fetch/cache/filter/prune).
-- `.claude/skills/scalar-openapi-doc-plan/` — resume skill for new sessions _(forthcoming — subtask 1.3)_.
+- `.claude/skills/scalar-openapi-doc-plan/` — resume skill for new sessions.
 
 ## Test Commands
 
