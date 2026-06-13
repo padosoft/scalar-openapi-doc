@@ -16,8 +16,7 @@ return new class extends Migration
             $table->string('tag', 191);
             $table->timestamps();
 
-            $table->unique(['user_id', 'tag']);
-            $table->index('user_id');
+            $table->unique(['user_id', 'tag']); // leading column covers user_id-only lookups
         });
     }
 

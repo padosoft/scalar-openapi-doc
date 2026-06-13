@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\AuthEvent;
+use App\Enums\HttpVerb;
 use App\Models\AuthLog;
 use App\Models\ScalarServer;
 use App\Models\User;
@@ -89,5 +90,52 @@ class DataModelTest extends TestCase
 
         $this->assertSame(5, $server->sort_order);
         $this->assertTrue($server->is_active);
+    }
+
+    public function test_allowed_endpoint_method_is_cast_to_http_verb_enum(): void
+    {
+        $user = User::factory()->create();
+        UserAllowedEndpoint::create(['user_id' => $user->id, 'method' => HttpVerb::Get, 'path' => '/items']);
+
+        $endpoint = UserAllowedEndpoint::query()->where('user_id', $user->id)->first();
+
+        $this->assertInstanceOf(HttpVerb::class, $endpoint->method);
+        $this->assertSame(HttpVerb::Get, $endpoint->method);
+        $this->assertSame('GET', $endpoint->method->value);
+    }
+
+    public function test_http_verb_values_returns_all_seven_verbs(): void
+    {
+        $values = HttpVerb::values();
+
+        $this->assertCount(7, $values);
+        $this->assertContains('GET', $values);
+        $this->assertContains('POST', $values);
+        $this->assertContains('PUT', $values);
+        $this->assertContains('PATCH', $values);
+        $this->assertContains('DELETE', $values);
+        $this->assertContains('HEAD', $values);
+        $this->assertContains('OPTIONS', $values);
+    }
+
+    public function test_user_has_many_relations_return_correct_types(): void
+    {
+        $user = User::factory()->create();
+        UserAllowedTag::create(['user_id' => $user->id, 'tag' => 'Pets']);
+        UserAllowedEndpoint::create(['user_id' => $user->id, 'method' => HttpVerb::Post, 'path' => '/pets']);
+        AuthLog::create([
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'event' => AuthEvent::Login,
+        ]);
+
+        $this->assertCount(1, $user->allowedTags);
+        $this->assertInstanceOf(UserAllowedTag::class, $user->allowedTags->first());
+
+        $this->assertCount(1, $user->allowedEndpoints);
+        $this->assertInstanceOf(UserAllowedEndpoint::class, $user->allowedEndpoints->first());
+
+        $this->assertCount(1, $user->authLogs);
+        $this->assertInstanceOf(AuthLog::class, $user->authLogs->first());
     }
 }

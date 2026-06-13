@@ -19,8 +19,7 @@ return new class extends Migration
             $table->string('path', 255);
             $table->timestamps();
 
-            $table->unique(['user_id', 'method', 'path']);
-            $table->index('user_id');
+            $table->unique(['user_id', 'method', 'path']); // leading column covers user_id-only lookups
         });
     }
 
