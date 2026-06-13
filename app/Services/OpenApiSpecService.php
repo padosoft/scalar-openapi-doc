@@ -274,6 +274,14 @@ final class OpenApiSpecService
             ));
         }
 
+        // Root `security` applies only to operations that don't override it. If
+        // no surviving operation inherits it, the requirement is vacuous — and
+        // would dangle (referencing a securityScheme that pruning then removes),
+        // yielding an invalid spec. Drop it in that case.
+        if (isset($spec['security']) && ! $this->inheritsRootSecurity($spec)) {
+            unset($spec['security']);
+        }
+
         // Prune orphan components.
         if (Config::boolean('openapi.prune_components', true)) {
             $spec = $this->pruneComponents($spec);
@@ -474,7 +482,6 @@ final class OpenApiSpecService
     private function securitySchemeNames(array $spec): array
     {
         $names = [];
-        $rootInherited = false;
 
         $collect = function (mixed $security) use (&$names): void {
             foreach ($this->asArray($security) as $requirement) {
@@ -491,18 +498,39 @@ final class OpenApiSpecService
                 foreach ($this->operations($pathItem) as $operation) {
                     if (array_key_exists('security', $operation)) {
                         $collect($operation['security']);
-                    } else {
-                        $rootInherited = true;
                     }
                 }
             }
         }
 
-        if ($rootInherited) {
+        if ($this->inheritsRootSecurity($spec)) {
             $collect($spec['security'] ?? null);
         }
 
         return array_keys($names);
+    }
+
+    /**
+     * Whether at least one surviving operation (in paths/webhooks) inherits the
+     * root `security` — i.e. lacks its own `security` key. An operation that
+     * declares `security` (including `security: []`, an explicit opt-out) does
+     * not inherit root; one without the key does.
+     *
+     * @param  array<array-key, mixed>  $spec
+     */
+    private function inheritsRootSecurity(array $spec): bool
+    {
+        foreach (['paths', 'webhooks'] as $container) {
+            foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
+                foreach ($this->operations($pathItem) as $operation) {
+                    if (! array_key_exists('security', $operation)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -562,8 +590,10 @@ final class OpenApiSpecService
     }
 
     /**
-     * SSRF guard: the upstream URL must parse, use an allowed scheme, and (when
-     * a host allow-list is configured) target an allowed host.
+     * SSRF guard: the upstream URL must parse, use an allowed scheme, and target
+     * an allowed host. Host validation is ALWAYS enforced — when the configured
+     * allow-list is empty, it falls back to the configured upstream URL's own
+     * host (never "any host"), and fails closed if no host can be resolved.
      */
     private function assertAllowedUrl(string $url): void
     {
@@ -582,7 +612,17 @@ final class OpenApiSpecService
         $host = strtolower((string) $parts['host']);
         /** @var list<string> $hosts */
         $hosts = config('openapi.allowed_hosts', []);
-        if ($hosts !== [] && ! in_array($host, array_map('strtolower', $hosts), true)) {
+
+        // Empty allow-list = lock to the configured upstream host, as documented
+        // in config/openapi.php — NOT "trust every host". Fail closed if neither
+        // a list nor a resolvable upstream host is available.
+        if ($hosts === []) {
+            $configuredUpstream = config('openapi.upstream_url');
+            $upstreamHost = is_string($configuredUpstream) ? parse_url($configuredUpstream, PHP_URL_HOST) : null;
+            $hosts = is_string($upstreamHost) && $upstreamHost !== '' ? [$upstreamHost] : [];
+        }
+
+        if ($hosts === [] || ! in_array($host, array_map('strtolower', $hosts), true)) {
             throw new InvalidOpenApiSpecException("OpenAPI upstream host [{$host}] is not allowed.");
         }
     }

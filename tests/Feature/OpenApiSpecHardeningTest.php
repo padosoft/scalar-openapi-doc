@@ -74,6 +74,20 @@ class OpenApiSpecHardeningTest extends TestCase
         }
     }
 
+    public function test_blank_allowed_hosts_locks_to_the_configured_upstream_host(): void
+    {
+        // With OPENAPI_ALLOWED_HOSTS blank (the .env.example default), host
+        // validation is NOT disabled: it falls back to the upstream URL's own
+        // host, so a fetch of the configured upstream still succeeds.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json', 'openapi.allowed_hosts' => []]);
+        Cache::flush();
+        Http::fake(['*' => Http::response($this->validSpec(), 200, ['Content-Type' => 'application/json'])]);
+
+        $this->service()->fetchRaw();
+
+        expect(Cache::has((string) config('openapi.cache_key')))->toBeTrue();
+    }
+
     // ---- B3: anti cache-poisoning -----------------------------------------
 
     public function test_does_not_cache_a_non_openapi_payload(): void
@@ -147,7 +161,10 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['paths']))->toBe(['/secure'])
             ->and($filtered)->not->toHaveKey('webhooks')
             ->and(array_keys($filtered['components']['securitySchemes']))->toBe(['ApiKeyAuth'])
-            ->and(array_keys($filtered['components']['schemas']))->toBe(['OrderEvent']);
+            ->and(array_keys($filtered['components']['schemas']))->toBe(['OrderEvent'])
+            // /secure declares its own security, so no survivor inherits root:
+            // the (redundant) root requirement is dropped, the scheme stays.
+            ->and($filtered)->not->toHaveKey('security');
     }
 
     public function test_keeps_only_granted_webhook_and_drops_secured_path(): void
@@ -156,7 +173,11 @@ class OpenApiSpecHardeningTest extends TestCase
 
         expect($filtered['paths'])->toBe([])
             ->and(array_keys($filtered['webhooks']))->toBe(['newOrder'])
-            ->and(array_keys($filtered['components']['schemas']))->toBe(['WebhookPayload']);
+            ->and(array_keys($filtered['components']['schemas']))->toBe(['WebhookPayload'])
+            // newOrder has no own security, so it inherits the root requirement,
+            // which is therefore kept (and its ApiKeyAuth scheme survives pruning).
+            ->and($filtered)->toHaveKey('security')
+            ->and(array_keys($filtered['components']['securitySchemes']))->toBe(['ApiKeyAuth']);
     }
 
     public function test_non_admin_without_grants_receives_no_webhooks(): void
@@ -174,7 +195,9 @@ class OpenApiSpecHardeningTest extends TestCase
         // the root security and the securityScheme must NOT survive pruning.
         $filtered = $this->service()->filterForUser($this->spec31(), collect([]), collect([]));
 
-        expect($filtered)->not->toHaveKey('components');
+        // Both the scheme AND the now-dangling root `security` requirement go.
+        expect($filtered)->not->toHaveKey('components')
+            ->and($filtered)->not->toHaveKey('security');
     }
 
     public function test_prune_components_off_keeps_all_components(): void
