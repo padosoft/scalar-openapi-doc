@@ -1,160 +1,160 @@
-# Piano di Implementazione — Portale API Docs (scalar-openapi-doc)
+# Implementation Plan — API Docs Portal (scalar-openapi-doc)
 
 ## Context
 
-Repo `padosoft/scalar-openapi-doc` (al kickoff vuoto: solo README+LICENSE, branch `main`). Obiettivo: app **Laravel 13 + PHP 8.5 (Herd)** che renderizza documentazione OpenAPI via **Scalar**, aggiungendo ciò che Scalar non offre: **login (Fortify)**, **ruoli admin/user (spatie/laravel-permission)** e **filtraggio server-side per-utente della spec** (l'utente vede solo tag/endpoint concessi, semantica UNION; admin vede tutto). Spec esterna fetchata con cache Redis + fallback stale-on-error. Admin: CRUD utenti con grant anti-tampering, server playground iniettati in `servers`, audit log auth, svuota cache.
+Repo `padosoft/scalar-openapi-doc` (empty at kickoff: only README+LICENSE, branch `main`). Goal: a **Laravel 13 + PHP 8.5 (Herd)** app that renders OpenAPI documentation via **Scalar**, adding what Scalar doesn't offer: **login (Fortify)**, **admin/user roles (spatie/laravel-permission)**, and **server-side per-user spec filtering** (user sees only granted tags/endpoints, UNION semantics; admin sees all). External spec fetched with Redis cache + stale-on-error fallback. Admin: user CRUD with anti-tampering grants, playground servers injected into `servers`, auth audit log, cache flush.
 
-Fonti: la spec tecnica `SPEC_Portale_API_Docs.md` + skeleton PHP pronti (OpenApiSpecService, test golden Pest, fixture openapi.json, config openapi.php, CacheController, seeders), forniti dall'owner in una cartella locale fuori dal repo. Convenzioni di workflow riusate dal repo di riferimento interno `product_image_discovery_admin` (AGENTS.md, RULES.md, PROGRESS.md, LESSON.md, loop PR/Copilot). I percorsi locali di queste sorgenti sono macchina-specifici e non vengono versionati.
+Sources: the technical spec `SPEC_Portale_API_Docs.md` + ready PHP skeletons (OpenApiSpecService, Pest golden tests, openapi.json fixture, openapi.php config, CacheController, seeders), provided by the owner in a local folder outside the repo. Workflow conventions reused from the internal reference repo `product_image_discovery_admin` (AGENTS.md, RULES.md, PROGRESS.md, LESSON.md, PR/Copilot loop). The local paths of these sources are machine-specific and are not versioned.
 
-**Decisioni utente:** dev locale con **MySQL via Herd** + **Redis via Herd** (test: SQLite `:memory:` + cache `array`); **UI in inglese**; stack starter kit `laravel/react-starter-kit` (Inertia 3 + React 19 + TS + Tailwind 4 + shadcn/ui), Pest, Pint, Larastan max, Vitest, Playwright.
+**User decisions:** local dev with **MySQL via Herd** + **Redis via Herd** (tests: SQLite `:memory:` + `array` cache); **UI in English**; starter kit stack `laravel/react-starter-kit` (Inertia 3 + React 19 + TS + Tailwind 4 + shadcn/ui), Pest, Pint, Larastan max, Vitest, Playwright.
 
-**Ambiente verificato:** Herd PHP 8.5.7, Node 25.2.1, composer (Herd), gh CLI, copilot CLI — tutti disponibili.
+**Verified environment:** Herd PHP 8.5.7, Node 25.2.1, composer (Herd), gh CLI, copilot CLI — all available.
 
 ---
 
-## Deep Analysis — bug e problemi trovati negli skeleton
+## Deep Analysis — bugs and issues found in the skeletons
 
-Da fixare come subtask espliciti (riferimenti a `OpenApiSpecService.php` skeleton):
+To be fixed as explicit subtasks (references to `OpenApiSpecService.php` skeleton):
 
-| # | Problema | Dove | Fix pianificato |
+| # | Issue | Where | Planned fix |
 |---|---|---|---|
-| B1 | **Dipendenza nascosta da `Auth::`** dentro il service (`Auth::user()` in `filterForUser` riga 199, `Auth::id()` in `flushCache` riga 65). Viola DI, complica i test (i golden test dichiarano "nessun utente autenticato" ma il service chiama Auth) | Service | Refactor: `filterForUser(..., bool $isAdmin = false)` e `flushCache(bool $includeStale, ?int $actorId)`; decide il controller (T4.2) |
-| B2 | **Cache poisoning**: qualunque JSON valido dell'upstream viene cachato 1h senza validare che sia una spec OpenAPI (righe 92-95) | Service | Validare shape minima (`openapi`+`info`+`paths`) prima del put; `InvalidOpenApiSpecException` + fallback stale (T4.3) |
-| B3 | **SSRF**: nessuna validazione di `upstream_url` (schema/host) prima del fetch | Service | Whitelist `allowed_schemes`/`allowed_hosts` in config, check `parse_url` pre-fetch (T4.4) |
-| B4 | **Pruning components incompleto**: perde `securitySchemes` (referenziati per nome via `security`, non via `$ref`), `$ref` a livello path-item, `webhooks`/`pathItems` OpenAPI 3.1 | Service | Seed della reachability esteso + fixture 3.1 dedicata (T4.5) |
-| B5 | Ruolo `'admin'` hardcoded | Service/gate | `config('openapi.admin_role')` (T4.6) |
-| B6 | Stale cache `Cache::forever` senza TTL (by design ma non documentato) | Service | Docblock + nota in RULES.md; `flushCache(true)` la rimuove (T4.6) |
-| B7 | `injectServers` accetta qualunque array senza validare shape `{url, description?}` | Service | Validazione entry, skip+warning su entry malformate (T4.6) |
-| B8 | **Gap di test**: nessun test su errori upstream (down/malformed), `prune_components=false`, grant vuoti, normalizzazione case endpoint key, cache-hit senza HTTP, securitySchemes | Test | Suite estesa (T4.7) |
-| B9 | Fixture path hardcoded `tests/Fixtures/openapi.json` nel test ma file fornito in root della cartella piano | Test | Copia in `tests/Fixtures/` (T4.1) |
+| B1 | **Hidden `Auth::` dependency** inside the service (`Auth::user()` in `filterForUser` line 199, `Auth::id()` in `flushCache` line 65). Violates DI, complicates tests (golden tests declare "no authenticated user" but the service calls Auth) | Service | Refactor: `filterForUser(..., bool $isAdmin = false)` and `flushCache(bool $includeStale, ?int $actorId)`; controller decides (T4.2) |
+| B2 | **Cache poisoning**: any valid upstream JSON is cached for 1h without validating it is an OpenAPI spec (lines 92-95) | Service | Validate minimum shape (`openapi`+`info`+`paths`) before cache put; `InvalidOpenApiSpecException` + stale fallback (T4.3) |
+| B3 | **SSRF**: no validation of `upstream_url` (scheme/host) before fetch | Service | Whitelist `allowed_schemes`/`allowed_hosts` in config, `parse_url` check pre-fetch (T4.4) |
+| B4 | **Incomplete component pruning**: drops `securitySchemes` (referenced by name via `security`, not via `$ref`), `$ref` at path-item level, `webhooks`/`pathItems` OpenAPI 3.1 | Service | Extended reachability seed + dedicated 3.1 fixture (T4.5) |
+| B5 | Hardcoded `'admin'` role | Service/gate | `config('openapi.admin_role')` (T4.6) |
+| B6 | Stale cache `Cache::forever` with no TTL (by design but undocumented) | Service | Docblock + note in RULES.md; `flushCache(true)` removes it (T4.6) |
+| B7 | `injectServers` accepts any array without validating shape `{url, description?}` | Service | Entry validation, skip+warning on malformed entries (T4.6) |
+| B8 | **Test gap**: no tests for upstream errors (down/malformed), `prune_components=false`, empty grants, endpoint key case normalisation, cache-hit without HTTP, securitySchemes | Tests | Extended suite (T4.7) |
+| B9 | Fixture path hardcoded as `tests/Fixtures/openapi.json` in test but file provided in plan folder root | Tests | Copy to `tests/Fixtures/` (T4.1) |
 
-**Migliorie/feature mancanti incluse nel piano:** guard "ultimo admin" (no self-delete/demote), `Cache-Control: private, no-store` sul proxy (contenuto per-utente), rate limiting login, evento `Failed` in audit (la spec lo dà opzionale → lo includo), comando `auth-logs:prune`, validazione URL nei server playground, empty/loading/error states UI, dark/light mode.
+**Improvements/missing features included in the plan:** "last admin" guard (no self-delete/demote), `Cache-Control: private, no-store` on the proxy (per-user content), login rate limiting, `Failed` event in audit (spec marks it optional → included), `auth-logs:prune` command, URL validation in playground servers, empty/loading/error UI states, dark/light mode.
 
-**Fuori scope v1 (documentate in README come roadmap):** supporto multi-spec, invalidazione cache via webhook/ETag upstream, 2FA, export audit CSV.
-
----
-
-## Workflow Contract (vale per OGNI macro task — verrà codificato in AGENTS.md)
-
-- Branch `task/<nome>` da `main` per ogni macro task. Ogni subtask = branch figlio + **PR verso il macro branch**. Macro task concluso = PR macro branch → `main`.
-- **Definition of Done di ogni subtask:**
-  1. Obiettivo preciso + dettagli implementativi + guardrail: **Pest** (PHP), **Vitest** (JS), **Playwright** per ogni interazione UI/UX (skip se solo backend).
-  2. Loop locale: tutti i test verdi + `pint --test` + Larastan max puliti → **review Copilot locale (report-only)**: `copilot --autopilot --yolo -p "/review ... DO NOT modify or commit any files - report findings only"` passando il diff del branch **vs la base del PR** (macro branch per i subtask; `origin/main` solo per il PR macro), salvato su file temp se grande → ripetere fino a **zero commenti**. Nota: `--yolo` può modificare i file; il prompt deve imporre report-only e i fix li applichi tu.
-  3. Push → apertura PR (gh CLI) → **aggiungere Copilot come reviewer** (`gh pr edit <PR> --add-reviewer copilot`; in pratica fallisce su questo repo → usare il fallback GraphQL `requestReviewsByLogin` con `copilot-pull-request-reviewer[bot]`, vedi AGENTS.md) → verificare che la review sia partita.
-  4. Attendere **CI tutta verde** + commenti di **tutti i reviewer bot configurati** (questo repo ne ha due: **Copilot** e il connector **Codex** — entrambi vincolanti) → fixare test rotti e ogni commento → ri-push e nuova review in loop (Codex si stimola con un commento `@codex review`).
-  5. Solo con tutto ok: **merge** e avanti col task successivo.
-- `docs/PROGRESS.md` aggiornato ad ogni step (così una sessione interrotta riparte esattamente da dov'era); `docs/LESSON.md` aggiornato ad ogni scoperta/fix da Copilot. Entrambi passati nel contesto di ogni subagent e riletti a inizio sessione.
-- Regole macchina: **sempre PHP/composer di Herd, mai XAMPP**; `.gitattributes` eol=lf.
-- Questo piano viene copiato nel repo come `docs/PLAN.md` (richiesta utente "salva il piano in un file md").
+**Out of scope for v1 (documented in README as roadmap):** multi-spec support, cache invalidation via upstream webhook/ETag, 2FA, audit CSV export.
 
 ---
 
-## Macro Task 1 — `task/project-conventions` (PRIMO, prima di ogni riga di codice)
+## Workflow Contract (applies to EVERY macro task — codified in AGENTS.md)
 
-Obiettivo: codificare regole/skill/agents in formato Claude così che la procedura sopravviva alla fine sessione. Adattato dal repo di riferimento (Operating Rules, Branch & PR Loop, fallback GraphQL Copilot, regola Herd-non-XAMPP, template LESSON/PROGRESS).
-
-- **1.1 AGENTS.md + CLAUDE.md** — AGENTS.md: Operating Rules (strict_types, early return, no array_merge in loop, Actions-oriented, FormRequest/Resource/Enum), Branch & PR Loop con comandi esatti, gate di test, comando copilot review locale + fallback GraphQL, regola Herd. CLAUDE.md: puntatore ad AGENTS.md + quick facts (stack, comandi test, percorsi chiave). DoD: file committati e mergiati (solo docs, niente test).
-- **1.2 docs/RULES.md + docs/PROGRESS.md + docs/LESSON.md + docs/PLAN.md** — RULES.md: standard §14 spec + template DoD + regola "Playwright obbligatorio per UI". PROGRESS.md: tabella macro task pre-popolata da questo piano. LESSON.md: template datato. PLAN.md: questo piano.
-- **1.3 Skill di resume `.claude/skills/scalar-openapi-doc-plan/SKILL.md`** — frontmatter con description tipo "Continue or resume the scalar-openapi-doc implementation… enforce branch/PR/Copilot/test rules"; Start Here → AGENTS.md, RULES.md, PROGRESS.md, LESSON.md. Più `.claude/settings.json` con allowlist comandi progetto.
-
-Dipendenze: nessuna. No Playwright (solo docs).
-
-## Macro Task 2 — `task/bootstrap` (scaffold + tooling qualità + CI)
-
-Obiettivo: app Laravel 13 + react-starter-kit funzionante su Herd, con Pint/Larastan/Pest/Vitest/Playwright e CI verde.
-
-- **2.1 Starter kit in repo non-vuoto** — `laravel new` rifiuta dir non vuote: scaffold in dir temp sibling (`laravel new` o `composer create-project laravel/react-starter-kit`), copia nel repo preservando `.git` e LICENSE (README starter accantonato, riscritto in T9). `.gitattributes` eol=lf. Verificare wiring auth del kit (Fortify atteso in L13) e annotare in LESSON.md. DoD: `php artisan about` ok su Herd, `npm run build` ok, login page renderizza, test Pest del kit verdi. `.env` dev: MySQL Herd (`scalar_openapi_doc` db) + `CACHE_STORE=redis` (Redis Herd).
-- **2.2 Tooling qualità** — larastan (level max) + `phpstan.neon.dist`; `pint.json`; `phpunit.xml`: sqlite `:memory:`, `CACHE_STORE=array`, `SESSION_DRIVER=array`, `QUEUE_CONNECTION=sync`. Vitest (jsdom, `pool` Windows-safe) + test componente sample. Playwright config con `webServer: php artisan serve` + `.env.testing.e2e` (sqlite file, seed dedicato). DoD: 5 comandi verdi in locale (pint, larastan, pest, vitest+build, playwright hello-world).
-- **2.3 CI `.github/workflows/ci.yml`** — ubuntu-latest, `shivammathur/setup-php` PHP 8.5 (fallback 8.4 documentato, Laravel 13 richiede `^8.3`). Test su sqlite+array cache (niente servizi MySQL/Redis in CI: il codice è driver-agnostic via facades). Job paralleli: pint --test, larastan, pest, tsc+vitest+vite build, playwright (artifacts trace on failure). DoD: CI verde sulla PR macro.
-
-Dipendenze: T1. No Playwright reale (stub e2e ok).
-
-## Macro Task 3 — `task/rbac-data-model` (DB, ruoli, modelli, seeder) — solo backend
-
-- **3.1 spatie/laravel-permission + ruoli** — install, `HasRoles` su User, `config/openapi.php` con chiave `admin_role` (fix B5), integrazione `RoleSeeder`/`AdminUserSeeder` (env `ADMIN_EMAIL`/`ADMIN_PASSWORD`)/`DatabaseSeeder` dagli skeleton. Guardrail Pest: seeder crea ruoli+admin; middleware `role:admin` registrato e 403 per user semplice.
-- **3.2 Migrazioni custom + modelli + enum** — `user_allowed_tags` (UNIQUE user_id+tag, CASCADE), `user_allowed_endpoints` (UNIQUE user_id+method+path, CASCADE), `scalar_servers`, `auth_logs` (user_id nullable SET NULL, email snapshot, event, ip 45, ua 512, solo created_at, indici). Enum `AuthEvent`/`HttpVerb`. Modelli + relazioni + casts + `$fillable`. Guardrail Pest: vincoli unique, cascade, SET NULL, niente updated_at su auth_logs.
-- **3.3 `ReplaceUserAccessAction`** — transazione: delete righe utente → bulk insert chunked (ADR-07, no array_merge in loop). Guardrail Pest: replace corretto, array vuoti svuotano, rollback atomico su failure.
-
-Dipendenze: T2. Parallelo possibile con T4.
-
-## Macro Task 4 — `task/openapi-service` (core + golden test + hardening) — solo backend
-
-Cuore di sicurezza: slice piccole, una review per fix.
-
-- **4.1 Integrazione baseline** — copia skeleton: `app/Services/OpenApiSpecService.php`, `config/openapi.php`, test golden in `tests/Feature/`, fixture in `tests/Fixtures/openapi.json` (fix B9). DoD: 9 golden test verdi as-is, Larastan max pulito.
-- **4.2 Rimozione dipendenza Auth (B1)** — `filterForUser(array $spec, Collection $tags, Collection $endpoints, bool $isAdmin = false)`; `flushCache(bool $includeStale = false, ?int $actorId = null)`. Guardrail: test parametrizzati admin-bypass (`isAdmin=true + admin_sees_all=true` → spec integrale; `admin_sees_all=false` → filtra comunque).
-- **4.3 Validazione risposta upstream (B2)** — shape minima prima del cache put; `InvalidOpenApiSpecException`; fallback stale. Guardrail Pest con `Http::fake`: HTML/`{"foo":1}`/body vuoto → niente in cache, stale servita se esiste, throw se no.
-- **4.4 Guardia SSRF (B3)** — config `openapi.allowed_schemes` (default `['https']`) + `openapi.allowed_hosts` (env, csv); check pre-fetch. Guardrail: `file://`, IP metadata `169.254.169.254`, host fuori whitelist → rifiutati, `Http::assertNothingSent()`.
-- **4.5 Pruning completo (B4)** — seed reachability con: securitySchemes per nome da `security` root+operation; `$ref` a livello path-item; `webhooks`/`components.pathItems` 3.1. Fixture `openapi31.json` aggiuntiva. Guardrail golden: scheme usato preservato, inutilizzato potato, schema referenziato da webhook sopravvive.
-- **4.6 Hardening restante (B5, B6, B7)** — `admin_role` configurabile nei punti di check ruolo; docblock semantica stale; `injectServers` valida `{url: valid URL, description?: string}` con skip+warning. Guardrail: test injectServers malformati; `flushCache(true)` rimuove stale.
-- **4.7 Copertura mancante (B8)** — upstream down→stale; down+no stale→throw; `prune_components=false`; grant vuoti; normalizzazione `get`→`GET` nelle chiavi endpoint (canonical `UPPER(method) path` normalizzata nel service); cache-hit→`Http::assertNothingSent`.
-
-Dipendenze: T2 (T3 non necessario: dopo 4.2 il service è user-agnostic).
-
-## Macro Task 5 — `task/scalar-proxy` (Scalar + proxy + flush cache + dashboard)
-
-- **5.1 scalar/laravel + auth wrapping** *(subtask a rischio)* — install, publish config; `'url' => '/api-docs/openapi.json'`, tema purple/modern. Verificare se la rotta del package accetta middleware via config; se no: disabilitare rotta package e registrare `GET /scalar` proprio in gruppo `web,auth` renderizzando la Blade pubblicata (`scalar-views`). Gate `viewScalar` (hasAnyRole con nomi ruolo configurabili). Guardrail Pest: guest→redirect login; senza ruolo→403; user/admin→200.
-- **5.2 Proxy spec + meta endpoints** — `ApiDocsController`: `spec()` = fetchRaw → filterForUser (grant da DB, isAdmin dal ruolo config) → injectServers (server attivi per sort_order) → JSON con `Cache-Control: private, no-store`. `metaTags()`/`metaEndpoints()` sotto `auth, role:admin`. Rotte §9. Guardrail Pest: due utenti con grant diversi ricevono spec diverse; operazione non concessa assente; admin spec integrale; guest 401; meta 403 per user; servers iniettati solo se attivi.
-- **5.3 Flush cache: action + command** — `CacheController` adattato (actorId esplicito) → `DELETE /admin/openapi-cache`; comando `openapi:refresh --include-stale`. Guardrail Pest: 403 per user, flush+flash per admin; comando svuota chiave.
-- **5.4 Dashboard + nav (prima UI reale)** — dashboard/sidebar starter kit adattate: link "API Documentation" (pagina intera → `/scalar`), voci admin-only (Users, Servers, Auth Logs, Flush Cache con ConfirmDialog+toast). Vitest: rendering condizionale nav per ruolo. **Playwright:** login user → sidebar solo docs, `/scalar` carica e Scalar renderizza; login admin → voci admin visibili; Flush Cache → dialog → toast successo; nav diretta `/admin/users` da user → 403.
-
-Dipendenze: T3+T4.
-
-## Macro Task 6 — `task/admin-users` (CRUD utenti + grant anti-tampering)
-
-- **6.1 FormRequest + controller (backend)** — `StoreUserRequest`/`UpdateUserRequest` (§6.5): name/email/password (confirmed su create, nullable su update), `roles` in nomi configurati, `allowed_tags` `Rule::in(extractTags(fetchRaw()))`, `allowed_endpoints` `{method,path}` validati vs `extractEndpoints()` (ADR-05). `Admin\UserController` Inertia CRUD; store/update: `syncRoles` + `ReplaceUserAccessAction` in transazione. Guard "ultimo admin": vietato eliminare se stessi / rimuovere l'ultimo admin. Guardrail Pest: tag/endpoint manomessi → 422; replace corretto; password opzionale in update; guard ultimo admin; index con paginazione+search.
-- **6.2 Componenti UI condivisi** — `data-table.tsx` (TanStack+shadcn, sort, paginazione server-side), `multi-select.tsx` (combobox multi con ricerca), `confirm-dialog.tsx`, `role-badge.tsx`. **Vitest:** MultiSelect select/deselect/search/preselezione; DataTable righe+callback paginazione.
-- **6.3 Pagine Users (Inertia)** — `admin/users/index.tsx` (griglia email/nome/ruoli, search testuale, filtro ruolo, paginazione server-side, azioni riga) e `form.tsx` create/edit con MultiSelect alimentate da `/api-docs/meta/*`, **preselezione in edit**. **Playwright:** create user (form, ruolo, 2 tag + 1 endpoint via search multiselect, submit, toast, appare in griglia); edit (preselezioni visibili, rimuovi una, salva, riapri → persistito); delete con confirm; search filtra; filtro ruolo; paginazione.
-
-Dipendenze: T5.
-
-## Macro Task 7 — `task/admin-servers-audit` (server playground + audit)
-
-- **7.1 Servers CRUD** — `ServerRequest` (url valid URL required, description nullable, sort_order int, is_active bool), `Admin\ServerController`, pagina `admin/servers/index.tsx`. Guardrail Pest: CRUD + integrazione "solo attivi iniettati dal proxy". **Playwright:** aggiungi server → appare; toggle inactive → sparisce dalla spec del proxy; edit/delete con confirm.
-- **7.2 Listener audit** *(backend-only)* — `LogAuthEventAction` + listener `Illuminate\Auth\Events\{Login,Logout,Failed}` (resilienti al wiring Fortify); comando `auth-logs:prune --days=N` + scheduler. Guardrail Pest: login ok → riga `login` (user_id, email, ip, UA); password errata → riga `failed` (email snapshot, user_id null); logout → riga `logout`; righe sopravvivono alla cancellazione utente. Audit immutabile (nessuna rotta update/delete).
-- **7.3 Pagina Auth Logs** — `Admin\AuthLogController@index` (filtri utente/email, evento, intervallo date; paginazione server-side, più recenti prima) + `admin/auth-logs/index.tsx` read-only con badge evento. **Playwright:** login/logout reali poi da admin verifica righe; filtro event=failed dopo tentativo errato; empty-state su filtro date.
-
-Dipendenze: T6 (componenti condivisi). 7.1 ∥ 7.2.
-
-## Macro Task 8 — `task/hardening-polish` (security pass + E2E completo + UX)
-
-- **8.1 Security pass** — rate limiting login (429 dopo N tentativi), audit CSRF su tutte le mutazioni, audit mass-assignment, header `Cache-Control: private, no-store` verificato sul proxy, Larastan max su tutta l'app, `composer audit` + `npm audit`. Guardrail Pest: 429 su brute force; header proxy.
-- **8.2 Matrice autorizzazioni E2E** — Playwright spec della matrice §4.2 (user vs admin su tutte le rotte) + scenario chiave: **due utenti seedati con grant disgiunti → la sidebar Scalar mostra a ciascuno solo i propri tag; admin vede tutto**.
-- **8.3 Polish UX/a11y** — dark/light, loading/empty/error states ovunque, focus management nei dialog, responsive. Playwright smoke keyboard-nav (tab nel form utente, Esc chiude dialog).
-
-Dipendenze: T5–T7.
-
-## Macro Task 9 — `task/release` (README WOW + consolidamento knowledge + tag)
-
-- **9.1 README WOW** (modello lopadova/AskMyDocs) — badge (CI, license, PHP/Laravel), TOC, "cosa ha di innovativo" (filtraggio per-utente server-side, grant UNION, pruning transitivo components, stale-on-error, anti-tampering), Quick Start a prova di junior (Herd, tabella `.env` §18.1, seed admin, comandi step-by-step verificati su clone pulito), matrice testing, note sicurezza. **Niente banner/screenshot:** `resources/banner.png` non fornito (verificare di nuovo a fine lavori; se comparso, includerlo).
-- **9.2 Consolidamento LESSON.md → rules/skills/AGENTS.md** *(task finale richiesto)* — rileggere LESSON.md e tutto l'appreso; promuovere ogni lezione ricorrente in regola/skill/aggiornamento AGENTS.md e CLAUDE.md; archiviare le lezioni promosse.
-- **9.3 Tag + release GitHub** — `git tag v1.0.0` + `gh release create v1.0.0` con changelog dalle PR macro mergiate.
-
-Dipendenze: tutte le precedenti.
+- Branch `task/<name>` from `main` for each macro task. Each subtask = child branch + **PR into the macro branch**. Macro task complete = PR macro branch → `main`.
+- **Definition of Done for each subtask:**
+  1. Precise objective + implementation details + guardrails: **Pest** (PHP), **Vitest** (JS), **Playwright** for every UI/UX interaction (skip if backend-only).
+  2. Local loop: all tests green + `pint --test` + Larastan max clean → **local Copilot review (report-only)**: `copilot --autopilot --yolo -p "/review ... DO NOT modify or commit any files - report findings only"` passing the diff of the branch **vs the PR base** (macro branch for subtasks; `origin/main` only for the macro PR), saved to a temp file if large → repeat until **zero comments**. Note: `--yolo` can modify files; the prompt must enforce report-only and you apply the fixes yourself.
+  3. Push → open PR (gh CLI) → **add Copilot as reviewer** (`gh pr edit <PR> --add-reviewer copilot`; in practice fails on this repo → use the GraphQL fallback `requestReviewsByLogin` with `copilot-pull-request-reviewer[bot]`, see AGENTS.md) → verify the review has started.
+  4. Wait for **CI fully green** + comments from **all configured bot reviewers** (this repo has two: **Copilot** and the **Codex** connector — both equally binding) → fix broken tests and every comment → re-push and new review in a loop (nudge Codex with a `@codex review` comment).
+  5. Only when everything is ok: **merge** and proceed to the next task.
+- `docs/PROGRESS.md` updated after every step (so an interrupted session resumes exactly where it left off); `docs/LESSON.md` updated on every discovery/Copilot fix. Both passed in every subagent context and re-read at session start.
+- Machine rules: **always Herd PHP/composer, never XAMPP**; `.gitattributes` eol=lf.
+- This plan is copied into the repo as `docs/PLAN.md` (user request: "save the plan in a markdown file").
 
 ---
 
-## Ordine ed eventuale parallelismo
+## Macro Task 1 — `task/project-conventions` (FIRST, before any line of code)
 
-`1 → 2 → {3 ∥ 4} → 5 → 6 → 7 → 8 → 9`. Dentro T7: 7.1 ∥ 7.2. Subagent paralleli ricevono sempre nel prompt il contenuto di `docs/LESSON.md` + regole di AGENTS.md.
+Goal: codify rules/skill/agents in Claude format so the procedure survives session end. Adapted from the reference repo (Operating Rules, Branch & PR Loop, Copilot GraphQL fallback, Herd-not-XAMPP rule, LESSON/PROGRESS templates).
 
-## CI (riepilogo)
+- **1.1 AGENTS.md + CLAUDE.md** — AGENTS.md: Operating Rules (strict_types, early return, no array_merge in loop, Actions-oriented, FormRequest/Resource/Enum), Branch & PR Loop with exact commands, test gates, local copilot review command + GraphQL fallback, Herd rule. CLAUDE.md: pointer to AGENTS.md + quick facts (stack, test commands, key paths). DoD: files committed and merged (docs only, no tests).
+- **1.2 docs/RULES.md + docs/PROGRESS.md + docs/LESSON.md + docs/PLAN.md** — RULES.md: standards §14 spec + DoD template + "Playwright mandatory for UI" rule. PROGRESS.md: macro task table pre-populated from this plan. LESSON.md: dated template. PLAN.md: this plan.
+- **1.3 Resume skill `.claude/skills/scalar-openapi-doc-plan/SKILL.md`** — frontmatter with description like "Continue or resume the scalar-openapi-doc implementation… enforce branch/PR/Copilot/test rules"; Start Here → AGENTS.md, RULES.md, PROGRESS.md, LESSON.md. Plus `.claude/settings.json` with project command allowlist.
 
-`ci.yml` unico: ubuntu-latest, setup-php 8.5 (fallback 8.4), job paralleli pint/larastan/pest(sqlite+array)/tsc+vitest+build/playwright(sqlite file, seed, `php artisan serve` come webServer, trace artifacts). Cache composer+npm. Required checks su `main` e sui branch macro.
+Dependencies: none. No Playwright (docs only).
 
-## Rischi
+## Macro Task 2 — `task/bootstrap` (scaffold + quality tooling + CI)
 
-| Rischio | Mitigazione |
+Goal: working Laravel 13 + react-starter-kit app on Herd, with Pint/Larastan/Pest/Vitest/Playwright and green CI.
+
+- **2.1 Starter kit in non-empty repo** — `laravel new` rejects non-empty dirs: scaffold in a temp sibling dir (`laravel new` or `composer create-project laravel/react-starter-kit`), copy into the repo preserving `.git` and LICENSE (starter README set aside, rewritten in T9). `.gitattributes` eol=lf. Verify auth wiring of the kit (Fortify expected in L13) and annotate in LESSON.md. DoD: `php artisan about` ok on Herd, `npm run build` ok, login page renders, kit Pest tests green. `.env` dev: MySQL Herd (`scalar_openapi_doc` db) + `CACHE_STORE=redis` (Redis Herd).
+- **2.2 Quality tooling** — larastan (level max) + `phpstan.neon.dist`; `pint.json`; `phpunit.xml`: sqlite `:memory:`, `CACHE_STORE=array`, `SESSION_DRIVER=array`, `QUEUE_CONNECTION=sync`. Vitest (jsdom, Windows-safe `pool`) + sample component test. Playwright config with `webServer: php artisan serve` + `.env.testing.e2e` (sqlite file, dedicated seed). DoD: 5 commands green locally (pint, larastan, pest, vitest+build, playwright hello-world).
+- **2.3 CI `.github/workflows/ci.yml`** — ubuntu-latest, `shivammathur/setup-php` PHP 8.5 (fallback 8.4 documented, Laravel 13 requires `^8.3`). Tests on sqlite+array cache (no MySQL/Redis services in CI: code is driver-agnostic via facades). Parallel jobs: pint --test, larastan, pest, tsc+vitest+vite build, playwright (trace artifacts on failure). DoD: CI green on macro PR.
+
+Dependencies: T1. No real Playwright (stub e2e ok).
+
+## Macro Task 3 — `task/rbac-data-model` (DB, roles, models, seeders) — backend only
+
+- **3.1 spatie/laravel-permission + roles** — install, `HasRoles` on User, `config/openapi.php` with `admin_role` key (fix B5), integrate `RoleSeeder`/`AdminUserSeeder` (env `ADMIN_EMAIL`/`ADMIN_PASSWORD`)/`DatabaseSeeder` from skeletons. Pest guardrails: seeder creates roles+admin; `role:admin` middleware registered and 403 for plain user.
+- **3.2 Custom migrations + models + enums** — `user_allowed_tags` (UNIQUE user_id+tag, CASCADE), `user_allowed_endpoints` (UNIQUE user_id+method+path, CASCADE), `scalar_servers`, `auth_logs` (user_id nullable SET NULL, email snapshot, event, ip 45, ua 512, created_at only, indexes). Enums `AuthEvent`/`HttpVerb`. Models + relationships + casts + `$fillable`. Pest guardrails: unique constraints, cascade, SET NULL, no updated_at on auth_logs.
+- **3.3 `ReplaceUserAccessAction`** — transaction: delete user rows → chunked bulk insert (ADR-07, no array_merge in loop). Pest guardrails: correct replace, empty arrays clear, atomic rollback on failure.
+
+Dependencies: T2. Can run in parallel with T4.
+
+## Macro Task 4 — `task/openapi-service` (core + golden tests + hardening) — backend only
+
+Security core: small slices, one review per fix.
+
+- **4.1 Baseline integration** — copy skeletons: `app/Services/OpenApiSpecService.php`, `config/openapi.php`, golden tests in `tests/Feature/`, fixture in `tests/Fixtures/openapi.json` (fix B9). DoD: 9 golden tests green as-is, Larastan max clean.
+- **4.2 Remove Auth dependency (B1)** — `filterForUser(array $spec, Collection $tags, Collection $endpoints, bool $isAdmin = false)`; `flushCache(bool $includeStale = false, ?int $actorId = null)`. Guardrails: parameterised admin-bypass tests (`isAdmin=true + admin_sees_all=true` → full spec; `admin_sees_all=false` → still filters).
+- **4.3 Upstream response validation (B2)** — minimum shape before cache put; `InvalidOpenApiSpecException`; stale fallback. Pest guardrails with `Http::fake`: HTML/`{"foo":1}`/empty body → nothing cached, stale served if it exists, throw if not.
+- **4.4 SSRF guard (B3)** — config `openapi.allowed_schemes` (default `['https']`) + `openapi.allowed_hosts` (env, csv); check pre-fetch. Guardrails: `file://`, metadata IP `169.254.169.254`, host outside whitelist → rejected, `Http::assertNothingSent()`.
+- **4.5 Complete pruning (B4)** — reachability seed with: securitySchemes by name from root+operation `security`; `$ref` at path-item level; `webhooks`/`components.pathItems` 3.1. Additional `openapi31.json` fixture. Golden guardrails: used scheme preserved, unused pruned, schema referenced from webhook survives.
+- **4.6 Remaining hardening (B5, B6, B7)** — `admin_role` configurable at role check points; stale semantics docblock; `injectServers` validates `{url: valid URL, description?: string}` with skip+warning. Guardrails: malformed injectServers tests; `flushCache(true)` removes stale.
+- **4.7 Missing coverage (B8)** — upstream down→stale; down+no stale→throw; `prune_components=false`; empty grants; `get`→`GET` endpoint key normalisation (canonical `UPPER(method) path` normalised in service); cache-hit→`Http::assertNothingSent`.
+
+Dependencies: T2 (T3 not required: after 4.2 the service is user-agnostic).
+
+## Macro Task 5 — `task/scalar-proxy` (Scalar + proxy + cache flush + dashboard)
+
+- **5.1 scalar/laravel + auth wrapping** *(at-risk subtask)* — install, publish config; `'url' => '/api-docs/openapi.json'`, purple/modern theme. Verify whether the package route accepts middleware via config; if not: disable the package route and register `GET /scalar` directly in the `web,auth` group rendering the published Blade (`scalar-views`). Gate `viewScalar` (hasAnyRole with configurable role names). Pest guardrails: guest→redirect login; no role→403; user/admin→200.
+- **5.2 Spec proxy + meta endpoints** — `ApiDocsController`: `spec()` = fetchRaw → filterForUser (grants from DB, isAdmin from role config) → injectServers (active servers by sort_order) → JSON with `Cache-Control: private, no-store`. `metaTags()`/`metaEndpoints()` under `auth, role:admin`. Routes §9. Pest guardrails: two users with different grants receive different specs; ungranred operation absent; admin full spec; guest 401; meta 403 for user; servers injected only when active.
+- **5.3 Cache flush: action + command** — `CacheController` adapted (explicit actorId) → `DELETE /admin/openapi-cache`; `openapi:refresh --include-stale` command. Pest guardrails: 403 for user, flush+flash for admin; command empties the key.
+- **5.4 Dashboard + nav (first real UI)** — dashboard/sidebar starter kit adapted: "API Documentation" link (full page → `/scalar`), admin-only entries (Users, Servers, Auth Logs, Flush Cache with ConfirmDialog+toast). Vitest: conditional nav rendering by role. **Playwright:** login user → sidebar shows docs only, `/scalar` loads and Scalar renders; login admin → admin entries visible; Flush Cache → dialog → success toast; direct nav `/admin/users` from user → 403.
+
+Dependencies: T3+T4.
+
+## Macro Task 6 — `task/admin-users` (user CRUD + anti-tampering grants)
+
+- **6.1 FormRequest + controller (backend)** — `StoreUserRequest`/`UpdateUserRequest` (§6.5): name/email/password (confirmed on create, nullable on update), `roles` in configured names, `allowed_tags` `Rule::in(extractTags(fetchRaw()))`, `allowed_endpoints` `{method,path}` validated vs `extractEndpoints()` (ADR-05). `Admin\UserController` Inertia CRUD; store/update: `syncRoles` + `ReplaceUserAccessAction` in transaction. "Last admin" guard: forbidden to delete yourself / remove the last admin. Pest guardrails: tampered tags/endpoints → 422; correct replace; optional password on update; last admin guard; index with pagination+search.
+- **6.2 Shared UI components** — `data-table.tsx` (TanStack+shadcn, sort, server-side pagination), `multi-select.tsx` (multi combobox with search), `confirm-dialog.tsx`, `role-badge.tsx`. **Vitest:** MultiSelect select/deselect/search/pre-selection; DataTable rows+pagination callback.
+- **6.3 Users pages (Inertia)** — `admin/users/index.tsx` (email/name/roles grid, text search, role filter, server-side pagination, row actions) and `form.tsx` create/edit with MultiSelect fed from `/api-docs/meta/*`, **pre-selection on edit**. **Playwright:** create user (form, role, 2 tags + 1 endpoint via search multiselect, submit, toast, appears in grid); edit (pre-selections visible, remove one, save, reopen → persisted); delete with confirm; search filters; role filter; pagination.
+
+Dependencies: T5.
+
+## Macro Task 7 — `task/admin-servers-audit` (playground servers + audit)
+
+- **7.1 Servers CRUD** — `ServerRequest` (url valid URL required, description nullable, sort_order int, is_active bool), `Admin\ServerController`, `admin/servers/index.tsx` page. Pest guardrails: CRUD + integration "only active servers injected by proxy". **Playwright:** add server → appears; toggle inactive → disappears from proxy spec; edit/delete with confirm.
+- **7.2 Audit listener** *(backend-only)* — `LogAuthEventAction` + listeners for `Illuminate\Auth\Events\{Login,Logout,Failed}` (resilient to Fortify wiring); `auth-logs:prune --days=N` command + scheduler. Pest guardrails: successful login → `login` row (user_id, email, ip, UA); wrong password → `failed` row (email snapshot, user_id null); logout → `logout` row; rows survive user deletion. Immutable audit (no update/delete routes).
+- **7.3 Auth Logs page** — `Admin\AuthLogController@index` (filters by user/email, event, date range; server-side pagination, most recent first) + `admin/auth-logs/index.tsx` read-only with event badge. **Playwright:** real login/logout then verify rows from admin; filter event=failed after a failed attempt; empty-state on date filter.
+
+Dependencies: T6 (shared components). 7.1 ∥ 7.2.
+
+## Macro Task 8 — `task/hardening-polish` (security pass + full E2E + UX)
+
+- **8.1 Security pass** — login rate limiting (429 after N attempts), CSRF audit on all mutations, mass-assignment audit, `Cache-Control: private, no-store` header verified on proxy, Larastan max on full app, `composer audit` + `npm audit`. Pest guardrails: 429 on brute force; proxy header.
+- **8.2 Authorization matrix E2E** — Playwright spec of the §4.2 matrix (user vs admin on all routes) + key scenario: **two users seeded with disjoint grants → Scalar sidebar shows each user only their own tags; admin sees all**.
+- **8.3 UX/a11y polish** — dark/light, loading/empty/error states everywhere, focus management in dialogs, responsive. Playwright smoke keyboard-nav (tab in user form, Esc closes dialog).
+
+Dependencies: T5–T7.
+
+## Macro Task 9 — `task/release` (WOW README + knowledge consolidation + tag)
+
+- **9.1 WOW README** (modelled on lopadova/AskMyDocs) — badges (CI, license, PHP/Laravel), TOC, "what's innovative" (per-user server-side filtering, UNION grants, transitive component pruning, stale-on-error, anti-tampering), junior-proof Quick Start (Herd, `.env` table §18.1, seed admin, step-by-step commands verified on clean clone), testing matrix, security notes. **No banner/screenshot:** `resources/banner.png` not provided (re-check at end of work; if it exists, include it).
+- **9.2 LESSON.md consolidation → rules/skills/AGENTS.md** *(final required task)* — re-read LESSON.md and all learnings; promote every recurring lesson into a rule/skill/AGENTS.md+CLAUDE.md update; archive promoted lessons.
+- **9.3 Tag + GitHub release** — `git tag v1.0.0` + `gh release create v1.0.0` with changelog assembled from merged macro PRs.
+
+Dependencies: all previous.
+
+---
+
+## Execution order and parallelism
+
+`1 → 2 → {3 ∥ 4} → 5 → 6 → 7 → 8 → 9`. Within T7: 7.1 ∥ 7.2. Parallel subagents always receive `docs/LESSON.md` content + AGENTS.md rules in their prompt.
+
+## CI (summary)
+
+Single `ci.yml`: ubuntu-latest, setup-php 8.5 (fallback 8.4), parallel jobs pint/larastan/pest(sqlite+array)/tsc+vitest+build/playwright(sqlite file, seed, `php artisan serve` as webServer, trace artifacts). Composer+npm cache. Required checks on `main` and macro branches.
+
+## Risks
+
+| Risk | Mitigation |
 |---|---|
-| Starter kit rifiuta dir non vuota | Scaffold in temp sibling, copia preservando `.git`/LICENSE (T2.1) |
-| Rotta Scalar non wrappabile con middleware via config | Verifica vendor; fallback: rotta propria `/scalar` con Blade pubblicata (T5.1) |
-| Wiring Fortify diverso nel kit L13 | Verifica in T2.1; listener su `Illuminate\Auth\Events\*` (resilienti) (T7.2) |
-| Quirk Windows (Vitest pool, Playwright+Herd, CRLF) | pool Windows-safe, webServer `php artisan serve` Herd, `.gitattributes` eol=lf, regola mai-XAMPP in AGENTS.md |
-| PHP 8.5 instabile su CI | Pin setup-php, fallback 8.4 documentato (Laravel 13 = `^8.3`) |
-| Copilot CLI/review non disponibile temporaneamente | Registrare blocker in PROGRESS.md, non saltare il gate silenziosamente |
+| Starter kit rejects non-empty dir | Scaffold in temp sibling, copy preserving `.git`/LICENSE (T2.1) |
+| Scalar route not wrappable with middleware via config | Check vendor; fallback: own `/scalar` route with published Blade (T5.1) |
+| Fortify wiring different in L13 kit | Verify in T2.1; listeners on `Illuminate\Auth\Events\*` (resilient) (T7.2) |
+| Windows quirks (Vitest pool, Playwright+Herd, CRLF) | Windows-safe pool, webServer `php artisan serve` Herd, `.gitattributes` eol=lf, never-XAMPP rule in AGENTS.md |
+| PHP 8.5 unstable on CI | Pin setup-php, fallback 8.4 documented (Laravel 13 = `^8.3`) |
+| Copilot CLI/review temporarily unavailable | Record blocker in PROGRESS.md, do not skip the gate silently |
 
-## Verification (per l'intero progetto)
+## Verification (for the entire project)
 
-- Ogni subtask: `vendor/bin/pint --test` + `vendor/bin/phpstan analyse` + `php artisan test` (Pest) + `npm run test` (Vitest) + `npm run build` + `npx playwright test` (se UI) tutti verdi in locale (Herd PHP 8.5) e su CI.
-- E2E finale: matrice autorizzazioni completa + scenario "due utenti, grant disgiunti, sidebar Scalar diverse" (T8.2).
-- Quick Start del README verificato su clone pulito prima del tag (T9.1).
+- Every subtask: `vendor/bin/pint --test` + `vendor/bin/phpstan analyse` + `php artisan test` (Pest) + `npm run test` (Vitest) + `npm run build` + `npx playwright test` (if UI) all green locally (Herd PHP 8.5) and on CI.
+- Final E2E: full authorisation matrix + "two users, disjoint grants, different Scalar sidebars" scenario (T8.2).
+- README Quick Start verified on a clean clone before tagging (T9.1).
