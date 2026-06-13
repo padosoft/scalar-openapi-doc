@@ -3,27 +3,33 @@ name: tests
 on:
   push:
     branches:
-      - develop
       - main
       - master
-      - workos
+      - develop
   pull_request:
     branches:
-      - develop
       - main
       - master
-      - workos
+      - develop
+      - 'task/**'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  ci:
+  # Backend: PHPStan (max) + Pest. Pest runs on SQLite :memory: + array cache
+  # via phpunit.xml, so no MySQL/Redis services are needed.
+  php:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        php-version: ['8.3', '8.4', '8.5']
-
+        php-version: ['8.4', '8.5']
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -35,30 +41,133 @@ jobs:
         with:
           php-version: ${{ matrix.php-version }}
           tools: composer:v2
-          coverage: xdebug
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Static analysis (PHPStan max)
+        run: composer types:check
+
+      - name: Tests (Pest)
+        run: php artisan test
+
+  # Frontend: TypeScript type-check, Vitest unit tests, and production build.
+  # Needs PHP because tsc resolves the @/routes and @/actions modules that
+  # Wayfinder generates from the Laravel route/controller definitions.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
 
       - name: Setup Node
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: '22'
 
-      - name: Install Node Dependencies
-        run: npm i
-
-      - name: Install Dependencies
+      - name: Install Composer dependencies
         run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
-      - name: Copy Environment File
-        run: cp .env.example .env
+      - name: Install Node dependencies
+        run: npm install --no-audit --no-fund
 
-      - name: Generate Application Key
-        run: php artisan key:generate
+      - name: Prepare app
+        run: |
+          cp .env.example .env
+          php artisan key:generate
 
-      - name: Build Assets
+      - name: Generate Wayfinder routes/actions
+        run: php artisan wayfinder:generate --with-form
+
+      - name: Type-check (tsc)
+        run: npm run types:check
+
+      - name: Unit tests (Vitest)
+        run: npm run test
+
+      - name: Build assets
         run: npm run build
 
-      - name: Run Type Analysis
-        run: composer types:check
+  # End-to-end: Playwright against a served app backed by SQLite + array cache.
+  # Job-level env vars override the MySQL/Redis values in .env (Laravel does not
+  # overwrite real environment variables when loading .env), and `php artisan
+  # serve` (spawned by Playwright's webServer) inherits them.
+  e2e:
+    runs-on: ubuntu-latest
+    # Only spend the Playwright browser download once the cheaper PHP and
+    # frontend gates pass.
+    needs: [php, frontend]
+    env:
+      DB_CONNECTION: sqlite
+      DB_DATABASE: ${{ github.workspace }}/database/database.sqlite
+      CACHE_STORE: array
+      SESSION_DRIVER: database
+      QUEUE_CONNECTION: sync
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
-      - name: Tests
-        run: php artisan test
+      - name: Setup PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Install Node dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Create SQLite database
+        run: touch "$DB_DATABASE"
+
+      - name: Migrate database
+        run: php artisan migrate --force
+
+      - name: Build assets
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests (Playwright)
+        run: npm run e2e
+
+      - name: Upload Playwright report on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

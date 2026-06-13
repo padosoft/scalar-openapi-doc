@@ -3,19 +3,24 @@ name: linter
 on:
   push:
     branches:
-      - develop
       - main
       - master
-      - workos
+      - develop
   pull_request:
     branches:
-      - develop
       - main
       - master
-      - workos
+      - develop
+      - 'task/**'
 
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only: this job verifies style/lint, it never commits fixes.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
@@ -28,24 +33,33 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
 
-      - name: Install Dependencies
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
         run: |
-          composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
-          npm install
+          composer install -q --no-ansi --no-interaction --no-progress --prefer-dist
+          npm install --no-audit --no-fund
 
-      - name: Run Pint
-        run: composer lint
+      - name: Prepare app
+        run: |
+          cp .env.example .env
+          php artisan key:generate
 
-      - name: Format Frontend
-        run: npm run format
+      # ESLint's import/order rule must resolve the @/routes and @/actions
+      # modules that Wayfinder generates (they are gitignored).
+      - name: Generate Wayfinder routes/actions
+        run: php artisan wayfinder:generate --with-form
 
-      - name: Lint Frontend
-        run: npm run lint
+      - name: Check PHP code style (Pint)
+        run: composer lint:check
 
-      # - name: Commit Changes
-      #   uses: stefanzweifel/git-auto-commit-action@v7
-      #   with:
-      #     commit_message: fix code style
-      #     commit_options: '--no-verify'
+      - name: Check frontend formatting (Prettier)
+        run: npm run format:check
+
+      - name: Lint frontend (ESLint)
+        run: npm run lint:check
