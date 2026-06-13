@@ -86,6 +86,9 @@ jobs:
   # serve` (spawned by Playwright's webServer) inherits them.
   e2e:
     runs-on: ubuntu-latest
+    # Only spend the Playwright browser download once the cheaper PHP and
+    # frontend gates pass.
+    needs: [php, frontend]
     env:
       DB_CONNECTION: sqlite
       DB_DATABASE: ${{ github.workspace }}/database/database.sqlite
