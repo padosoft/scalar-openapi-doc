@@ -17,7 +17,7 @@ The full plan (macro tasks, analysis findings B1–B9, ordering) is in **`docs/P
 ## How to resume
 
 1. Read the four files above. Identify the current macro task + subtask from `docs/PROGRESS.md`.
-2. Confirm the environment: `(Get-Command php).Source` and `php -v` must show the **Herd** PHP 8.5 shim, not XAMPP. `gh auth status` and `copilot` must be available.
+2. Confirm the environment: `(Get-Command php).Source` and `php -v` must show the **Herd** PHP shim (8.5 on this machine; see AGENTS.md/PLAN.md for currently supported versions, ≥8.3), **not** XAMPP. `gh auth status` and `copilot` must be available.
 3. Check git: `git branch --show-current` and `git status`. Macro work lives on `task/<macro-name>`; each subtask is a child branch `task/<macro-name>-<n-n>-<slug>` with a PR into the macro branch.
 4. Continue the Branch & PR Loop (AGENTS.md) from where PROGRESS.md left off. Do not skip gates.
 
