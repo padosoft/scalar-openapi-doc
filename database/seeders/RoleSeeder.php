@@ -20,7 +20,8 @@ final class RoleSeeder extends Seeder
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         foreach ($this->roleNames() as $role) {
-            Role::findOrCreate($role, 'web');
+            $guard = config('fortify.guard', 'web');
+            Role::findOrCreate($role, is_string($guard) ? $guard : 'web');
         }
     }
 

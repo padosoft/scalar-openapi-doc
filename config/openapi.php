@@ -18,9 +18,10 @@ return [
 
     'admin_role' => env('OPENAPI_ADMIN_ROLE', 'admin'),
 
-    'viewer_roles' => array_values(array_filter(
+    'viewer_roles' => array_values(array_filter(array_map(
+        'trim',
         explode(',', (string) env('OPENAPI_VIEWER_ROLES', 'admin,user'))
-    )),
+    ))),
 
     /*
     |--------------------------------------------------------------------------
