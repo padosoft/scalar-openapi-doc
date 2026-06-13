@@ -1,6 +1,12 @@
 parameters:
 	ignoreErrors:
 		-
+			message: '#^Method App\\Actions\\Fortify\\CreateNewUser\:\:emailRules\(\) should return array\<int, array\<mixed\>\|Illuminate\\Contracts\\Validation\\ValidationRule\|string\> but returns array\<int, Illuminate\\Validation\\Rules\\Unique\|string\>\.$#'
+			identifier: return.type
+			count: 1
+			path: app/Actions/Fortify/CreateNewUser.php
+
+		-
 			message: '#^Cannot access property \$email_verified_at on App\\Models\\User\|null\.$#'
 			identifier: property.nonObject
 			count: 1
@@ -63,6 +69,12 @@ parameters:
 		-
 			message: '#^Cannot access property \$id on App\\Models\\User\|null\.$#'
 			identifier: property.nonObject
+			count: 1
+			path: app/Http/Requests/Settings/ProfileUpdateRequest.php
+
+		-
+			message: '#^Method App\\Http\\Requests\\Settings\\ProfileUpdateRequest\:\:emailRules\(\) should return array\<int, array\<mixed\>\|Illuminate\\Contracts\\Validation\\ValidationRule\|string\> but returns array\<int, Illuminate\\Validation\\Rules\\Unique\|string\>\.$#'
+			identifier: return.type
 			count: 1
 			path: app/Http/Requests/Settings/ProfileUpdateRequest.php
 

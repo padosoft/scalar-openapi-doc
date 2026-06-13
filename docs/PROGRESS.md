@@ -76,6 +76,8 @@ Bot findings on PR #4 mostly target **pristine starter-kit files** (out of scope
 ## T3 — task/rbac-data-model
 _Not started. Seeder skeletons reviewed: `RoleSeeder` (spatie `Role::findOrCreate` admin/user, guard `web`), `AdminUserSeeder` (`firstOrCreate` by `ADMIN_EMAIL`, assignRole admin — note: uses `env()` directly, route via config or read at runtime since `env()` returns null when config is cached), `DatabaseSeeder` (calls Role then AdminUser)._
 
+**Carried into T3 (from PR #7 / Codex):** disable Fortify self-registration — `Features::registration()` in `config/fortify.php` lets anyone sign up, bypassing the admin-provisioned/RBAC model. Remove the feature and the register link/page (`resources/js/pages/auth/register.tsx`, route, `RegistrationTest`) since users are created by admins only.
+
 ## T4 — task/openapi-service
 _Not started._
 
