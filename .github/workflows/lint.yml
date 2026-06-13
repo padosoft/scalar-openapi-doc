@@ -1,0 +1,65 @@
+name: linter
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+    branches:
+      - main
+      - master
+      - develop
+      - 'task/**'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only: this job verifies style/lint, it never commits fixes.
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@7c071dfe9dc99bdf297fa79cb49ea005b9fcadbc # v2
+        with:
+          php-version: '8.5'
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: |
+          composer install -q --no-ansi --no-interaction --no-progress --prefer-dist
+          npm install --no-audit --no-fund
+
+      - name: Prepare app
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # ESLint's import/order rule must resolve the @/routes and @/actions
+      # modules that Wayfinder generates (they are gitignored).
+      - name: Generate Wayfinder routes/actions
+        run: php artisan wayfinder:generate --with-form
+
+      - name: Check PHP code style (Pint)
+        run: composer lint:check
+
+      - name: Check frontend formatting (Prettier)
+        run: npm run format:check
+
+      - name: Lint frontend (ESLint)
+        run: npm run lint:check

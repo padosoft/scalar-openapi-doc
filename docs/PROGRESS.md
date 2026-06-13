@@ -6,8 +6,8 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 
 | # | Macro task | Branch | Status | Macro PR |
 |---|---|---|---|---|
-| T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟡 macro PR pending → `main` | — |
-| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | ⚪ pending | — |
+| T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟢 merged (PR #3 → `main`, `691db58`) | #3 |
+| T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟡 macro PR pending → `main` (2.1+2.2+2.3 merged) | — |
 | T3 | RBAC & data model | `task/rbac-data-model` | ⚪ pending | — |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | ⚪ pending | — |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | ⚪ pending | — |
@@ -45,10 +45,38 @@ Branch: `task/project-conventions-1-3-skill` → PR into `task/project-conventio
 ---
 
 ## T2 — task/bootstrap
-_Not started._
+
+### Subtask 2.1 — scaffold Laravel 13 + react-starter-kit
+Branch: `task/bootstrap-2-1-scaffold` → PR into `task/bootstrap`.
+
+- Scaffolding `laravel new ... --react --pest --database=mysql` into a temp sibling dir `C:\xampp\htdocs\scalar-openapi-doc-tmp`, then copying app files into the repo preserving `.git`, LICENSE, AGENTS.md, CLAUDE.md, docs/, .claude/, .gitattributes (starter README set aside; rewritten in T9).
+- `.env` dev target: MySQL via Herd (db `scalar_openapi_doc`), `CACHE_STORE=redis`.
+- Verify: `php artisan about` on Herd, `npm run build`, login page renders, starter Pest tests pass.
+- **Done:** scaffold committed `e36729b`, PR #4. Verified: artisan about (L13.15/PHP8.5/cache=redis/db=mysql), migrate OK, build OK, Pest 39/39, Pint clean, PHPStan L7 clean (needs `--memory-limit`).
+
+#### Bot review backlog from PR #4 (scaffold) — to action in later subtasks
+Bot findings on PR #4 mostly target **pristine starter-kit files** (out of scope for the faithful scaffold). Dispositions:
+- **T2.3 (CI):** starter CI (`.github/workflows/{lint,tests}.yml`) `pull_request.branches` allowlist is `develop/main/master/workos` only → subtask PRs into `task/**` get **no CI** (why PR #1–#4 had no checks). Add `task/**`. Also: lint workflow runs write-mode `format`/`lint` (should use `format:check`/`lint:check` to fail on violations) and has `contents: write` (drop to `contents: read`). **These are the reason the "CI green" gate has been vacuous so far.**
+- **T2.3 (PHPStan):** codify `--memory-limit` (default 128M crashes the parallel worker) and bump level 7 → max.
+- **T8 (security pass):** consider hardening pristine starter code if we keep it — `app/Http/Middleware/HandleAppearance.php` appearance cookie (validate against allowlist + JSON-encode in `app.blade.php` inline script); `passkey-register.tsx` reads `navigator` in render (SSR-unsafe if SSR enabled).
+- **Not-actionable / rejected:** `password-input.tsx` forwardRef — false positive under **React 19** (`ref` is a normal prop). `User.php` `MustVerifyEmail` — deliberately omitted: users are **admin-provisioned** (no self-registration), so email verification is not part of this product. `tests/Pest.php` placeholder helper — starter artifact, harmless; remove if it ever collides.
+
+### Subtask 2.2 — quality tooling (merged, PR #5)
+- PHPStan → **level max** + `phpstan-baseline.neon` (17 starter findings grandfathered) + `composer types:check` runs `--memory-limit=1G`.
+- **Vitest** (`vitest.config.ts` jsdom + `@` alias via `import.meta.url` + `pool: forks`; `vitest.setup.ts`; sample tests; jest-dom type decl) → `npm run test` 6 green.
+- **Playwright** (`playwright.config.ts` webServer `php artisan serve`; login smoke) → `npm run e2e` green.
+- Regenerated `package-lock.json` for the `@emnapi/*` peers (Codex). `phpunit.xml` already SQLite+array — unchanged.
+
+### Subtask 2.3 — CI (merged, PR #6)
+- Workflows trigger on `pull_request` for `task/**` (push only on main/master/develop) + `concurrency`; `lint.yml` `contents: read` + Node 22 + check-mode (`lint:check`/`format:check`) + `wayfinder:generate --with-form`.
+- `tests.yml` → 3 jobs: **php** (matrix 8.4/8.5: PHPStan max + Pest), **frontend** (PHP+Node, wayfinder, tsc + Vitest + build), **e2e** (`needs: [php, frontend]`, Playwright on SQLite + array + DB session).
+- **CI fixes (false-green locally, red on clean CI):** `npm install` not `npm ci` (Windows lock on Linux); `withoutVite()` in `TestCase` (Pest needs no Vite manifest); `wayfinder:generate --with-form` before tsc/eslint (gitignored generated modules); PHP `^8.4` + matrix 8.4/8.5 (Symfony 8.1 needs ≥8.4.1). All in `docs/LESSON.md`.
+- **All CI jobs green.** Merged into `task/bootstrap`.
 
 ## T3 — task/rbac-data-model
-_Not started._
+_Not started. Seeder skeletons reviewed: `RoleSeeder` (spatie `Role::findOrCreate` admin/user, guard `web`), `AdminUserSeeder` (`firstOrCreate` by `ADMIN_EMAIL`, assignRole admin — note: uses `env()` directly, route via config or read at runtime since `env()` returns null when config is cached), `DatabaseSeeder` (calls Role then AdminUser)._
+
+**Carried into T3 (from PR #7 / Codex):** disable Fortify self-registration — `Features::registration()` in `config/fortify.php` lets anyone sign up, bypassing the admin-provisioned/RBAC model. Remove the feature and the register link/page (`resources/js/pages/auth/register.tsx`, route, `RegistrationTest`) since users are created by admins only.
 
 ## T4 — task/openapi-service
 _Not started._
