@@ -311,89 +311,167 @@ final class OpenApiSpecService
      */
     private function pruneDanglingLinks(array $spec): array
     {
-        // Surviving operation identity (from the already-filtered paths/webhooks):
-        // operationId names, and "method path" locations for operationRef.
+        // Surviving operation identity (this runs AFTER pruneComponents, so the
+        // components present are already the surviving ones):
+        //   $ids       – operationId names from ALL surviving operations (incl.
+        //                callbacks and component path items), since operationId is
+        //                resolved globally.
+        //   $locations – container-aware "container\tmethod\tkey" for the TOP-LEVEL
+        //                paths/webhooks operations an operationRef can target.
         $ids = [];
         $locations = [];
+        $components = $this->asArray($spec['components'] ?? null);
+
         foreach (['paths', 'webhooks'] as $container) {
             foreach ($this->asArray($spec[$container] ?? null) as $key => $pathItem) {
                 foreach ($this->operations($pathItem) as $method => $operation) {
-                    $operationId = $operation['operationId'] ?? null;
-                    if (is_string($operationId)) {
-                        $ids[$operationId] = true;
-                    }
-                    if ($container === 'paths') {
-                        $locations[strtolower($method).' '.(string) $key] = true;
-                    }
+                    $locations[$container."\t".strtolower($method)."\t".(string) $key] = true;
                 }
+                $this->collectOperationIds($pathItem, $ids);
+            }
+        }
+        foreach ($this->asArray($components['pathItems'] ?? null) as $pathItem) {
+            $this->collectOperationIds($pathItem, $ids);
+        }
+        foreach ($this->asArray($components['callbacks'] ?? null) as $callback) {
+            foreach ($this->asArray($callback) as $pathItem) {
+                $this->collectOperationIds($pathItem, $ids);
             }
         }
 
-        // Which components.links survive (by their own target). A link that is a
-        // $ref to another components.link is conservatively kept (chains are rare).
+        // Which components.links survive (by their own target). A $ref to another
+        // components.link is conservatively kept (chains are rare).
         $survivingLinkNames = [];
-        $components = $this->asArray($spec['components'] ?? null);
         foreach ($this->asArray($components['links'] ?? null) as $name => $link) {
             if ($this->linkTargetSurvives($link, $ids, $locations, [])) {
                 $survivingLinkNames[(string) $name] = true;
             }
         }
 
-        $spec = $this->filterLinksIn($spec, ['paths', 'webhooks'], $ids, $locations, $survivingLinkNames);
-
-        if (is_array($spec['components'] ?? null)) {
-            $components = $spec['components'];
-            if (is_array($components['links'] ?? null)) {
-                $kept = [];
-                foreach ($components['links'] as $name => $link) {
-                    if (isset($survivingLinkNames[(string) $name])) {
-                        $kept[$name] = $link;
-                    }
-                }
-                $components['links'] = $kept;
-            }
-            if (is_array($components['responses'] ?? null)) {
-                $components['responses'] = $this->filterLinksInResponses($components['responses'], $ids, $locations, $survivingLinkNames);
-            }
-            $spec['components'] = $components;
-        }
-
-        return $spec;
-    }
-
-    /**
-     * Applies Link filtering to operations' responses under the given containers.
-     *
-     * @param  array<string, mixed>  $spec
-     * @param  list<string>  $containers
-     * @param  array<string, true>  $ids
-     * @param  array<string, true>  $locations
-     * @param  array<string, true>  $survivingLinkNames
-     * @return array<string, mixed>
-     */
-    private function filterLinksIn(array $spec, array $containers, array $ids, array $locations, array $survivingLinkNames): array
-    {
-        foreach ($containers as $container) {
+        // Filter inline links recursively (operations → responses + callbacks).
+        foreach (['paths', 'webhooks'] as $container) {
             $items = $this->asArray($spec[$container] ?? null);
             if ($items === []) {
                 continue;
             }
             $rebuilt = [];
             foreach ($items as $key => $pathItem) {
-                if (is_array($pathItem)) {
-                    foreach ($this->operations($pathItem) as $method => $operation) {
-                        if (is_array($operation['responses'] ?? null)) {
-                            $operation['responses'] = $this->filterLinksInResponses($operation['responses'], $ids, $locations, $survivingLinkNames);
-                            $pathItem[$method] = $operation;
-                        }
-                    }
-                }
-                $rebuilt[$key] = $pathItem;
+                $rebuilt[$key] = $this->filterLinksInPathItem($pathItem, $ids, $locations, $survivingLinkNames);
             }
             $spec[$container] = $rebuilt;
         }
 
+        if (! is_array($spec['components'] ?? null)) {
+            return $spec;
+        }
+        $components = $spec['components'];
+
+        if (is_array($components['pathItems'] ?? null)) {
+            $pathItems = [];
+            foreach ($components['pathItems'] as $name => $pathItem) {
+                $pathItems[$name] = $this->filterLinksInPathItem($pathItem, $ids, $locations, $survivingLinkNames);
+            }
+            $components['pathItems'] = $pathItems;
+        }
+        if (is_array($components['callbacks'] ?? null)) {
+            $callbacks = [];
+            foreach ($components['callbacks'] as $name => $callback) {
+                $callbacks[$name] = $this->filterLinksInCallback($callback, $ids, $locations, $survivingLinkNames);
+            }
+            $components['callbacks'] = $callbacks;
+        }
+        if (is_array($components['responses'] ?? null)) {
+            $components['responses'] = $this->filterLinksInResponses($components['responses'], $ids, $locations, $survivingLinkNames);
+        }
+        if (is_array($components['links'] ?? null)) {
+            $kept = [];
+            foreach ($components['links'] as $name => $link) {
+                if (isset($survivingLinkNames[(string) $name])) {
+                    $kept[$name] = $link;
+                }
+            }
+            $components['links'] = $kept;
+        }
+
+        $spec['components'] = $components;
+
         return $spec;
+    }
+
+    /**
+     * Collects operationId names from a path item's operations, recursing through
+     * their callbacks.
+     *
+     * @param  array<string, true>  $ids  (by-ref accumulator)
+     */
+    private function collectOperationIds(mixed $pathItem, array &$ids): void
+    {
+        foreach ($this->operations($pathItem) as $operation) {
+            $operationId = $operation['operationId'] ?? null;
+            if (is_string($operationId)) {
+                $ids[$operationId] = true;
+            }
+            foreach ($this->asArray($operation['callbacks'] ?? null) as $callback) {
+                foreach ($this->asArray($callback) as $cbPathItem) {
+                    $this->collectOperationIds($cbPathItem, $ids);
+                }
+            }
+        }
+    }
+
+    /**
+     * Filters dangling Link Objects from a path item: its operations' responses
+     * and (recursively) their callbacks. Non-arrays pass through unchanged.
+     *
+     * @param  array<string, true>  $ids
+     * @param  array<string, true>  $locations
+     * @param  array<string, true>  $survivingLinkNames
+     */
+    private function filterLinksInPathItem(mixed $pathItem, array $ids, array $locations, array $survivingLinkNames): mixed
+    {
+        if (! is_array($pathItem)) {
+            return $pathItem;
+        }
+
+        foreach (self::HTTP_VERBS as $verb) {
+            if (! is_array($pathItem[$verb] ?? null)) {
+                continue;
+            }
+            $operation = $pathItem[$verb];
+            if (is_array($operation['responses'] ?? null)) {
+                $operation['responses'] = $this->filterLinksInResponses($operation['responses'], $ids, $locations, $survivingLinkNames);
+            }
+            if (is_array($operation['callbacks'] ?? null)) {
+                $callbacks = [];
+                foreach ($operation['callbacks'] as $name => $callback) {
+                    $callbacks[$name] = $this->filterLinksInCallback($callback, $ids, $locations, $survivingLinkNames);
+                }
+                $operation['callbacks'] = $callbacks;
+            }
+            $pathItem[$verb] = $operation;
+        }
+
+        return $pathItem;
+    }
+
+    /**
+     * Filters dangling Link Objects within a Callback object (expr → path item).
+     *
+     * @param  array<string, true>  $ids
+     * @param  array<string, true>  $locations
+     * @param  array<string, true>  $survivingLinkNames
+     */
+    private function filterLinksInCallback(mixed $callback, array $ids, array $locations, array $survivingLinkNames): mixed
+    {
+        if (! is_array($callback)) {
+            return $callback;
+        }
+
+        foreach ($callback as $expression => $pathItem) {
+            $callback[$expression] = $this->filterLinksInPathItem($pathItem, $ids, $locations, $survivingLinkNames);
+        }
+
+        return $callback;
     }
 
     /**
@@ -427,8 +505,8 @@ final class OpenApiSpecService
     /**
      * Whether a Link Object's target survives: a $ref to a surviving
      * components.link, an operationId in the surviving set, or an operationRef
-     * resolving to a surviving path operation. A link with no resolvable local
-     * target (external operationRef, or none) is kept.
+     * resolving to a surviving path/webhook operation. A link with no resolvable
+     * local target (external operationRef, or none) is kept.
      *
      * @param  array<string, true>  $ids
      * @param  array<string, true>  $locations
@@ -464,29 +542,34 @@ final class OpenApiSpecService
     }
 
     /**
-     * Whether an `operationRef` ("#/paths/<escaped-path>/<method>") targets a
-     * surviving path operation. Non-local refs (external, or not under #/paths/)
-     * are left untouched.
+     * Whether an `operationRef` targets a surviving operation. Handles the two
+     * LOCAL forms — "#/paths/<escaped-path>/<method>" and
+     * "#/webhooks/<key>/<method>" — checked against the container-aware location
+     * set. Non-local refs (external, or other targets) are left untouched.
      *
      * @param  array<string, true>  $locations
      */
     private function operationRefSurvives(string $operationRef, array $locations): bool
     {
-        $prefix = '#/paths/';
-        if (! str_starts_with($operationRef, $prefix)) {
-            return true;
+        foreach (['paths', 'webhooks'] as $container) {
+            $prefix = '#/'.$container.'/';
+            if (! str_starts_with($operationRef, $prefix)) {
+                continue;
+            }
+
+            $rest = substr($operationRef, strlen($prefix));
+            $pos = strrpos($rest, '/');
+            if ($pos === false) {
+                return true;
+            }
+
+            $key = str_replace(['~1', '~0'], ['/', '~'], substr($rest, 0, $pos));
+            $method = strtolower(substr($rest, $pos + 1));
+
+            return isset($locations[$container."\t".$method."\t".$key]);
         }
 
-        $rest = substr($operationRef, strlen($prefix));
-        $pos = strrpos($rest, '/');
-        if ($pos === false) {
-            return true;
-        }
-
-        $path = str_replace(['~1', '~0'], ['/', '~'], substr($rest, 0, $pos));
-        $method = strtolower(substr($rest, $pos + 1));
-
-        return isset($locations[$method.' '.$path]);
+        return true; // external/unknown operationRef — leave as-is
     }
 
     /**

@@ -637,6 +637,36 @@ class OpenApiSpecHardeningTest extends TestCase
             ->toHaveKey('toSelf')->not->toHaveKey('toSecret');
     }
 
+    public function test_prunes_links_to_filtered_webhooks_and_in_callback_responses(): void
+    {
+        // Links can target a webhook via operationRef, and links also live inside
+        // callback responses — both must be pruned when their target is filtered.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toHook' => ['operationRef' => '#/webhooks/secretHook/post'],
+                    ]]],
+                    'callbacks' => ['cb' => ['{$request.body#/u}' => ['post' => [
+                        'responses' => ['200' => ['description' => 'ack', 'links' => [
+                            'cbToSecret' => ['operationRef' => '#/paths/~1secret/get'],
+                        ]]],
+                    ]]]],
+                ]],
+                '/secret' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+            'webhooks' => ['secretHook' => ['post' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([])
+            ->and($filtered['paths']['/a']['get']['callbacks']['cb']['{$request.body#/u}']['post']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_keeps_discriminator_mapping_target_schemas(): void
     {
         // discriminator.mapping values are schema refs (by URI or bare name) not
