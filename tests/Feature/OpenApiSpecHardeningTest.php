@@ -564,6 +564,41 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($out['paths']['/x']['get'])->not->toHaveKey('servers');
     }
 
+    public function test_inject_servers_strips_link_object_servers(): void
+    {
+        // OpenAPI Link Objects carry a singular `server` — it must be stripped too
+        // (responses.*.links.*.server and components.links.*.server).
+        $spec = [
+            'openapi' => '3.1.0',
+            'paths' => ['/x' => ['get' => [
+                'responses' => ['200' => ['description' => 'ok', 'links' => [
+                    'next' => ['operationId' => 'getNext', 'server' => ['url' => 'https://internal.upstream/link']],
+                ]]],
+            ]]],
+            'components' => ['links' => [
+                'Shared' => ['operationId' => 'shared', 'server' => ['url' => 'https://internal.upstream/clink']],
+            ]],
+        ];
+
+        $out = $this->service()->injectServers($spec, [['url' => 'https://api.example.com']]);
+
+        expect($out['paths']['/x']['get']['responses']['200']['links']['next'])->not->toHaveKey('server')
+            ->and($out['components']['links']['Shared'])->not->toHaveKey('server');
+    }
+
+    public function test_inject_servers_does_not_log_credentials_for_rejected_entries(): void
+    {
+        Log::spy();
+
+        $this->service()->injectServers(['openapi' => '3.1.0'], [['url' => 'https://user:pass@api.example.com']]);
+
+        Log::shouldHaveReceived('warning')->withArgs(function (string $message, array $context): bool {
+            $blob = $message.' '.(string) json_encode($context);
+
+            return ! str_contains($blob, 'user:pass') && ! str_contains($blob, 'pass@');
+        })->once();
+    }
+
     public function test_inject_servers_rejects_credential_bearing_url(): void
     {
         // A server URL with embedded userinfo would ship credentials to the

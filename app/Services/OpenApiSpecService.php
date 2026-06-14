@@ -320,7 +320,10 @@ final class OpenApiSpecService
         foreach ($servers as $server) {
             $url = $server['url'] ?? null;
             if (! is_string($url) || ! $this->isValidServerUrl($url)) {
-                Log::warning('Skipping invalid OpenAPI server entry (missing/empty/malformed url)', ['server' => $server]);
+                // Redact: a rejected entry may itself carry credentials in its URL.
+                Log::warning('Skipping invalid OpenAPI server entry (missing/empty/malformed url)', [
+                    'url' => is_string($url) ? $this->redactUrl($url) : '[non-string]',
+                ]);
 
                 continue;
             }
@@ -396,14 +399,29 @@ final class OpenApiSpecService
             $components['callbacks'] = $callbacks;
         }
 
+        if (is_array($components['links'] ?? null)) {
+            $links = [];
+            foreach ($components['links'] as $name => $link) {
+                if (is_array($link)) {
+                    unset($link['server']);
+                }
+                $links[$name] = $link;
+            }
+            $components['links'] = $links;
+        }
+
         $spec['components'] = $components;
 
         return $spec;
     }
 
     /**
-     * Strips `servers` from a path-item object and each of its operations
-     * (recursing through operation callbacks). Non-arrays pass through unchanged.
+     * Strips Server Objects from a path-item object and each of its operations:
+     * the operation/path-item `servers` arrays, the singular `server` of any Link
+     * Object under `responses.*.links.*`, and (recursing) operation callbacks.
+     * Non-arrays pass through unchanged. Server Objects occur in exactly these
+     * spec locations (root/path-item/operation servers + Link server), so this
+     * makes server stripping exhaustive.
      */
     private function stripPathItemServers(mixed $pathItem): mixed
     {
@@ -419,11 +437,19 @@ final class OpenApiSpecService
             }
             $operation = $pathItem[$verb];
             unset($operation['servers']);
-            if (isset($operation['callbacks']) && is_array($operation['callbacks'])) {
+
+            if (is_array($operation['callbacks'] ?? null)) {
+                $callbacks = [];
                 foreach ($operation['callbacks'] as $name => $callback) {
-                    $operation['callbacks'][$name] = $this->stripCallbackServers($callback);
+                    $callbacks[$name] = $this->stripCallbackServers($callback);
                 }
+                $operation['callbacks'] = $callbacks;
             }
+
+            if (is_array($operation['responses'] ?? null)) {
+                $operation['responses'] = $this->stripLinkServers($operation['responses']);
+            }
+
             $pathItem[$verb] = $operation;
         }
 
@@ -444,6 +470,34 @@ final class OpenApiSpecService
         }
 
         return $callback;
+    }
+
+    /**
+     * Removes the singular `server` field from every Link Object in a Responses
+     * map (responses.*.links.*.server), so a Link's Server URL can't expose an
+     * upstream/internal host after the top-level servers are replaced.
+     *
+     * @param  array<array-key, mixed>  $responses
+     * @return array<array-key, mixed>
+     */
+    private function stripLinkServers(array $responses): array
+    {
+        $result = [];
+        foreach ($responses as $code => $response) {
+            if (is_array($response) && is_array($response['links'] ?? null)) {
+                $links = [];
+                foreach ($response['links'] as $name => $link) {
+                    if (is_array($link)) {
+                        unset($link['server']);
+                    }
+                    $links[$name] = $link;
+                }
+                $response['links'] = $links;
+            }
+            $result[$code] = $response;
+        }
+
+        return $result;
     }
 
     // ---------------------------------------------------------------------
