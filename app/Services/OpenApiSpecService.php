@@ -774,24 +774,40 @@ final class OpenApiSpecService
     }
 
     /**
-     * Normalises a URL path, resolving "." and ".." segments.
+     * Normalises a URL path, resolving "." and ".." segments per RFC 3986 §5.2.4
+     * WITHOUT collapsing empty segments: "//openapi.json" and "/openapi.json/" are
+     * distinct paths from "/openapi.json" and must stay distinct, or an external
+     * ref like "https://host//openapi.json#/..." would compare equal to the
+     * configured upstream document and leak its local components.
      */
     private function normalizePath(string $path): string
     {
+        if ($path === '') {
+            return '/';
+        }
+        $leadingSlash = str_starts_with($path, '/');
+        $segments = explode('/', $path);
+        if ($leadingSlash) {
+            array_shift($segments); // drop the empty segment before the leading '/'
+        }
         $out = [];
-        foreach (explode('/', $path) as $segment) {
-            if ($segment === '' || $segment === '.') {
-                continue;
+        foreach ($segments as $segment) {
+            if ($segment === '.') {
+                continue; // current-directory marker — drop
             }
             if ($segment === '..') {
-                array_pop($out);
+                if ($out !== [] && end($out) !== '..') {
+                    array_pop($out); // ascend (pops a name OR an empty segment)
+                } elseif (! $leadingSlash) {
+                    $out[] = '..'; // relative path may keep a leading ".."
+                }
 
                 continue;
             }
-            $out[] = $segment;
+            $out[] = $segment; // keep names AND empty segments ("//", trailing "/")
         }
 
-        return '/'.implode('/', $out);
+        return ($leadingSlash ? '/' : '').implode('/', $out);
     }
 
     /**
@@ -1453,15 +1469,19 @@ final class OpenApiSpecService
                     }
 
                     // `examples` keyword: a JSON-Schema array of raw values
-                    // (data) or a map of Example Objects. In the map case an
-                    // entry may be a real {$ref: #/components/examples/X};
-                    // collect that but never recurse into an example's `value`.
+                    // (data) or a map of Example Objects. An Example Objects map
+                    // with digit-only/sequential names ("0","1",…) decodes to a
+                    // PHP list, so we must NOT gate on array_is_list (that would
+                    // skip its real {$ref: #/components/examples/X} entries and
+                    // leave a dangling ref after pruning). Iterate either way and
+                    // collect each entry's own $ref — a genuine JSON-Schema values
+                    // array holds raw data whose top-level key isn't "$ref", so
+                    // nothing is collected from it. We never recurse into an
+                    // example's `value`, so example DATA is still skipped.
                     if ($key === 'examples' && is_array($child)) {
-                        if (! array_is_list($child)) {
-                            foreach ($child as $example) {
-                                if (is_array($example)) {
-                                    $addComponent($example['$ref'] ?? null);
-                                }
+                        foreach ($child as $example) {
+                            if (is_array($example)) {
+                                $addComponent($example['$ref'] ?? null);
                             }
                         }
 

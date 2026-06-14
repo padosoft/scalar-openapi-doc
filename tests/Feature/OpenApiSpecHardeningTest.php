@@ -1862,4 +1862,56 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components']['callbacks'] ?? [])->not->toHaveKey('Hidden')
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
+
+    public function test_external_double_slash_ref_does_not_keep_local_component(): void
+    {
+        // The upstream document is ".../openapi.json". A ref whose path has an extra
+        // empty segment ("...//openapi.json") is a DIFFERENT document, so it is external
+        // and must NOT keep the local Internal schema. Collapsing the empty segment
+        // would make it compare equal to the upstream and leak Internal.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => 'https://specs.example.com//openapi.json#/components/schemas/Internal'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Internal' => ['type' => 'object', 'description' => 'secret']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_keeps_example_ref_in_a_numeric_keyed_examples_map(): void
+    {
+        // An OpenAPI Example Objects map keyed by digits ("0","1") decodes to a PHP
+        // list; it must still be scanned for real #/components/examples/... refs so
+        // the referenced Example component survives (no dangling ref after pruning).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'examples' => [
+                        '0' => ['$ref' => '#/components/examples/Sample'],
+                        '1' => ['summary' => 's', 'value' => ['a' => 1]],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['examples' => [
+                'Sample' => ['summary' => 'sample', 'value' => ['ok' => true]],
+                'Unused' => ['value' => 1],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['examples']))->toBe(['Sample']);
+    }
 }
