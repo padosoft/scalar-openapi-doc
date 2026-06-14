@@ -993,9 +993,10 @@ final class OpenApiSpecService
                 continue;
             }
 
-            // Example component: follow only a top-level $ref (Reference Object),
-            // never its `value` data. Other components are walked in full.
-            $children = $type === 'examples'
+            // Example and Link components: follow only a top-level $ref (their
+            // other fields are data — an Example's `value`, a Link's
+            // parameters/requestBody). Other components are walked in full.
+            $children = in_array($type, ['examples', 'links'], true)
                 ? $this->collectReachableRefs(['$ref' => (is_array($component) ? ($component['$ref'] ?? null) : null)])
                 : $this->collectReachableRefs($component);
 
@@ -1022,6 +1023,13 @@ final class OpenApiSpecService
                 return;
             }
             foreach ($value as $key => $child) {
+                // Skip data subtrees (a $dynamicAnchor inside example/x-* data is
+                // not a real schema anchor), matching collectReachableRefs.
+                if (in_array($key, ['example', 'examples', 'default', 'const', 'enum'], true)
+                    || (is_string($key) && str_starts_with($key, 'x-'))
+                ) {
+                    continue;
+                }
                 if (($key === '$anchor' || $key === '$dynamicAnchor' || $key === '$recursiveAnchor')
                     && is_string($child) && $child !== ''
                 ) {
@@ -1072,7 +1080,7 @@ final class OpenApiSpecService
         // path item is then walked in keyword position.
         $nameMaps = [
             'properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas',
-            'headers', 'content', 'encoding', 'links', 'callbacks', 'variables', 'responses',
+            'headers', 'content', 'encoding', 'callbacks', 'variables', 'responses',
         ];
 
         $addComponent = static function (mixed $ref) use (&$refs, $prefix): void {
@@ -1114,6 +1122,19 @@ final class OpenApiSpecService
                     if ($key === 'security') {
                         foreach ($this->securityRequirementSchemes($child) as $name) {
                             $refs[] = 'securitySchemes/'.$name;
+                        }
+
+                        continue;
+                    }
+
+                    // `links` map: a Link Object's only component reference is its
+                    // own `$ref` (to components.links). Its `parameters`/
+                    // `requestBody` are literal expression/Any DATA — never walked.
+                    if ($key === 'links' && is_array($child)) {
+                        foreach ($child as $link) {
+                            if (is_array($link)) {
+                                $addComponent($link['$ref'] ?? null);
+                            }
                         }
 
                         continue;

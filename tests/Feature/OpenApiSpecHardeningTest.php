@@ -482,6 +482,52 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Node']);
     }
 
+    public function test_false_anchor_in_example_data_is_ignored(): void
+    {
+        // A $dynamicAnchor inside example DATA is not a real anchor, so a
+        // $dynamicRef must not keep that component alive through it.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$dynamicRef' => '#node'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Hidden' => ['type' => 'object', 'example' => ['$dynamicAnchor' => 'node']],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->toBe([]);
+    }
+
+    public function test_link_request_body_ref_is_data_not_reachability(): void
+    {
+        // A Link Object's requestBody is a literal Any/expression — a $ref inside
+        // it is data, so it must not keep an unreachable component alive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok', 'links' => [
+                    'self' => ['operationId' => 'getA', 'requestBody' => ['$ref' => '#/components/schemas/Secret']],
+                ]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->toBe([])
+            ->and($filtered['paths']['/a']['get']['responses']['200']['links'])->toHaveKey('self');
+    }
+
     public function test_keeps_dynamic_anchor_target_schema(): void
     {
         // $dynamicRef: "#node" (anchor form) must keep the component declaring
