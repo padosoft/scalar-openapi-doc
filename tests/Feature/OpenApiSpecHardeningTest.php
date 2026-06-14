@@ -2049,6 +2049,72 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_callback_object_ref_with_sibling_expression_is_filtered(): void
+    {
+        // A Callback Object with a top-level `$ref` PLUS a sibling runtime-expression
+        // path item: the `$ref` alias is preserved (its target callback is filtered
+        // separately) but the sibling's Admin operation (and its schema) is dropped.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => [
+                    '$ref' => '#/components/callbacks/Public',
+                    '{$req}' => ['delete' => [
+                        'tags' => ['Admin'],
+                        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret']]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ]],
+                ]],
+            ]]],
+            'components' => [
+                'callbacks' => ['Public' => ['{$ev}' => ['post' => ['responses' => ['200' => ['description' => 'ok']]]]]],
+                'schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $cb = $filtered['paths']['/a']['get']['callbacks']['cb'];
+        expect($cb)->toHaveKey('$ref')
+            ->and($cb['{$req}'])->toEqual((object) []) // Admin-only sibling path item emptied
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_callback_path_item_alias_to_surviving_target_keeps_fields(): void
+    {
+        // A callback path item that is an alias {$ref: Public, parameters:[…]} where
+        // Public.get survives must KEEP its path-level parameters (they describe the
+        // surviving operation) — not over-prune them.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['{$req}' => [
+                    '$ref' => '#/components/pathItems/Public',
+                    'parameters' => [['name' => 'p', 'in' => 'query', 'schema' => ['$ref' => '#/components/schemas/Pub']]],
+                ]]],
+            ]]],
+            'components' => [
+                'pathItems' => ['Public' => ['get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]]]],
+                'schemas' => ['Pub' => ['type' => 'string']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $cbPathItem = $filtered['paths']['/a']['get']['callbacks']['cb']['{$req}'];
+        expect($cbPathItem)->toHaveKey('$ref')
+            ->and($cbPathItem)->toHaveKey('parameters')        // kept: alias target survives
+            ->and($filtered['components']['schemas'])->toHaveKey('Pub'); // its schema kept
+    }
+
     public function test_callback_path_item_ref_siblings_are_tag_filtered(): void
     {
         // A callback path item with a `$ref` PLUS a sibling Admin operation: the

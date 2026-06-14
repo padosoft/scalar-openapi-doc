@@ -265,12 +265,20 @@ final class OpenApiSpecService
         $usedTags = [];
         $pathItemComponents = $this->pathItemComponents($spec);
 
+        // Which reusable components.pathItems still have a surviving operation
+        // (directly or via a same-document $ref alias chain). Used so path-level
+        // fields on an alias path item are kept iff the alias resolves to a visible
+        // operation, and computed up front (independent of top-level filtering) so
+        // both the path filter's inline callbacks and the reusable-component filter
+        // can consult it.
+        $survivingPathItems = $this->survivingReusablePathItems($pathItemComponents, $tagSet);
+
         // Rebuild paths AND webhooks (OpenAPI 3.1) with the same rules, so a
         // non-admin never receives ungranted webhook operations either.
-        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags, 'paths', $pathItemComponents);
+        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags, 'paths', $pathItemComponents, $survivingPathItems);
 
         if (isset($spec['webhooks'])) {
-            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags, 'webhooks', $pathItemComponents);
+            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags, 'webhooks', $pathItemComponents, $survivingPathItems);
             if ($webhooks === []) {
                 unset($spec['webhooks']);
             } else {
@@ -286,7 +294,7 @@ final class OpenApiSpecService
         // Reusable operations have no canonical endpoint path, so only a TAG grant
         // authorizes them. (The unfiltered $pathItemComponents captured above is
         // untouched, so endpoint-granted top-level $ref'd paths still resolve fully.)
-        $spec = $this->filterReusableComponentOperations($spec, $tagSet, $usedTags);
+        $spec = $this->filterReusableComponentOperations($spec, $tagSet, $usedTags, $survivingPathItems);
 
         // Top-level tag cleanup.
         if (isset($spec['tags']) && is_array($spec['tags'])) {
@@ -1752,9 +1760,10 @@ final class OpenApiSpecService
      * @param  array<string, mixed>  $spec
      * @param  array<string, int>  $tagSet
      * @param  array<string, true>  $usedTags
+     * @param  array<string, true>  $survivingPathItems
      * @return array<string, mixed>
      */
-    private function filterReusableComponentOperations(array $spec, array $tagSet, array &$usedTags): array
+    private function filterReusableComponentOperations(array $spec, array $tagSet, array &$usedTags, array $survivingPathItems): array
     {
         $components = $spec['components'] ?? null;
         if (! is_array($components)) {
@@ -1765,7 +1774,7 @@ final class OpenApiSpecService
             $rebuilt = [];
             foreach ($components['pathItems'] as $name => $pathItem) {
                 $rebuilt[$name] = is_array($pathItem)
-                    ? $this->filterPathItemOperationsByTag($pathItem, $tagSet, $usedTags)
+                    ? $this->filterPathItemOperationsByTag($pathItem, $tagSet, $usedTags, $survivingPathItems)
                     : $pathItem;
             }
             $components['pathItems'] = $rebuilt;
@@ -1774,7 +1783,7 @@ final class OpenApiSpecService
         if (is_array($components['callbacks'] ?? null)) {
             $rebuilt = [];
             foreach ($components['callbacks'] as $name => $callback) {
-                $rebuilt[$name] = $this->filterCallbackOperationsByTag($callback, $tagSet, $usedTags);
+                $rebuilt[$name] = $this->filterCallbackOperationsByTag($callback, $tagSet, $usedTags, $survivingPathItems);
             }
             $components['callbacks'] = $rebuilt;
         }
@@ -1793,9 +1802,10 @@ final class OpenApiSpecService
      * @param  array<array-key, mixed>  $pathItem
      * @param  array<string, int>  $tagSet
      * @param  array<string, true>  $usedTags
+     * @param  array<string, true>  $survivingPathItems
      * @return array<array-key, mixed>|object
      */
-    private function filterPathItemOperationsByTag(array $pathItem, array $tagSet, array &$usedTags): array|object
+    private function filterPathItemOperationsByTag(array $pathItem, array $tagSet, array &$usedTags, array $survivingPathItems): array|object
     {
         $kept = [];
         foreach ($pathItem as $field => $value) {
@@ -1817,24 +1827,45 @@ final class OpenApiSpecService
             if ($operationTags !== [] && array_intersect_key($tagSet, array_flip($operationTags)) === []) {
                 continue;
             }
-            $kept[$field] = $this->filterOperationCallbacks($value, $tagSet, $usedTags);
+            $kept[$field] = $this->filterOperationCallbacks($value, $tagSet, $usedTags, $survivingPathItems);
             foreach ($operationTags as $t) {
                 $usedTags[$t] = true;
             }
         }
 
-        // Keep path-level (non-operation) fields only when at least one operation
-        // survived — they apply to those operations. With NO surviving operation,
-        // drop schema-bearing fields like `parameters` (the prune would otherwise
-        // walk their $refs and leak schemas to a user with no visible operation
-        // here), but PRESERVE a `$ref` alias: it targets another path-item component
-        // that is filtered on its own pass. A bare emptied item serializes as `{}`.
+        // A surviving operation keeps all path-level (non-operation) fields — they
+        // apply to it. With NO local surviving operation, schema-bearing fields like
+        // `parameters` would leak their schemas (the prune walks them) to a user
+        // with no visible operation here, so they are dropped — EXCEPT when a `$ref`
+        // alias resolves to a reusable path item that still has a surviving
+        // operation, in which case those fields describe that operation and are
+        // kept. A bare emptied item serializes as `{}`.
         if (array_intersect(array_keys($kept), self::HTTP_VERBS) !== []) {
             return $kept;
         }
         $ref = $kept['$ref'] ?? null;
+        if (! is_string($ref)) {
+            return (object) [];
+        }
 
-        return is_string($ref) ? ['$ref' => $ref] : (object) [];
+        return $this->refTargetIsSurvivingPathItem($ref, $survivingPathItems) ? $kept : ['$ref' => $ref];
+    }
+
+    /**
+     * Whether a same-document `$ref` targets a reusable components.pathItems entry
+     * that has a surviving operation (per $survivingPathItems).
+     *
+     * @param  array<string, true>  $survivingPathItems
+     */
+    private function refTargetIsSurvivingPathItem(string $ref, array $survivingPathItems): bool
+    {
+        $fragment = $this->localFragment($ref);
+        $prefix = '/components/pathItems/';
+        if ($fragment === null || ! str_starts_with($fragment, $prefix)) {
+            return false;
+        }
+
+        return isset($survivingPathItems[substr($fragment, strlen($prefix))]);
     }
 
     /**
@@ -1845,8 +1876,9 @@ final class OpenApiSpecService
      *
      * @param  array<string, int>  $tagSet
      * @param  array<string, true>  $usedTags
+     * @param  array<string, true>  $survivingPathItems
      */
-    private function filterOperationCallbacks(mixed $operation, array $tagSet, array &$usedTags): mixed
+    private function filterOperationCallbacks(mixed $operation, array $tagSet, array &$usedTags, array $survivingPathItems): mixed
     {
         if (! is_array($operation) || ! is_array($operation['callbacks'] ?? null)) {
             return $operation;
@@ -1854,7 +1886,7 @@ final class OpenApiSpecService
 
         $callbacks = [];
         foreach ($operation['callbacks'] as $name => $callback) {
-            $callbacks[$name] = $this->filterCallbackOperationsByTag($callback, $tagSet, $usedTags);
+            $callbacks[$name] = $this->filterCallbackOperationsByTag($callback, $tagSet, $usedTags, $survivingPathItems);
         }
         $operation['callbacks'] = $callbacks;
 
@@ -1862,32 +1894,106 @@ final class OpenApiSpecService
     }
 
     /**
-     * Tag-filters the operations within a reusable Callback Object. A callback is a
-     * map of runtime-expression => Path Item; each inline path item is filtered. A
-     * `$ref` alias (to another callback, or a path item whose own component is
-     * filtered separately) is left as-is.
+     * Tag-filters the operations within a Callback Object: a map of runtime
+     * expression => Path Item, optionally with a top-level `$ref` alias to another
+     * callback component. The `$ref` alias is preserved (its target is filtered on
+     * its own pass) while EVERY sibling expression's inline path item is filtered,
+     * so an Admin operation beside a public `$ref` cannot leak.
      *
      * @param  array<string, int>  $tagSet
      * @param  array<string, true>  $usedTags
+     * @param  array<string, true>  $survivingPathItems
      */
-    private function filterCallbackOperationsByTag(mixed $callback, array $tagSet, array &$usedTags): mixed
+    private function filterCallbackOperationsByTag(mixed $callback, array $tagSet, array &$usedTags, array $survivingPathItems): mixed
     {
-        if (! is_array($callback) || isset($callback['$ref'])) {
-            return $callback; // non-array, or an alias to another callback component
+        if (! is_array($callback)) {
+            return $callback;
         }
 
         $rebuilt = [];
-        foreach ($callback as $expression => $pathItem) {
-            // Always filter an inline path item, even one carrying a `$ref`: the
-            // alias is preserved (its target component is filtered separately) while
-            // any SIBLING operations are tag-filtered, so an Admin sibling next to a
-            // public `$ref` can't leak.
-            $rebuilt[$expression] = is_array($pathItem)
-                ? $this->filterPathItemOperationsByTag($pathItem, $tagSet, $usedTags)
-                : $pathItem;
+        foreach ($callback as $key => $value) {
+            if ($key === '$ref') {
+                $rebuilt[$key] = $value; // alias to another callback component (filtered there)
+
+                continue;
+            }
+            // Each remaining entry is expression => Path Item Object.
+            $rebuilt[$key] = is_array($value)
+                ? $this->filterPathItemOperationsByTag($value, $tagSet, $usedTags, $survivingPathItems)
+                : $value;
         }
 
         return $rebuilt;
+    }
+
+    /**
+     * The set of reusable components.pathItems names that have a surviving operation
+     * — directly (an untagged or granted-tagged verb) or transitively via a
+     * same-document `$ref` alias chain. Used so path-level fields on an alias path
+     * item are kept iff the alias resolves to a still-visible operation.
+     *
+     * @param  array<array-key, mixed>  $pathItems
+     * @param  array<string, int>  $tagSet
+     * @return array<string, true>
+     */
+    private function survivingReusablePathItems(array $pathItems, array $tagSet): array
+    {
+        $surviving = [];
+        foreach ($pathItems as $name => $pathItem) {
+            if (is_array($pathItem) && $this->pathItemHasSurvivingOperation($pathItem, $tagSet)) {
+                $surviving[(string) $name] = true;
+            }
+        }
+
+        $prefix = '/components/pathItems/';
+        do {
+            $changed = false;
+            foreach ($pathItems as $name => $pathItem) {
+                $key = (string) $name;
+                if (isset($surviving[$key]) || ! is_array($pathItem)) {
+                    continue;
+                }
+                $ref = $pathItem['$ref'] ?? null;
+                if (! is_string($ref)) {
+                    continue;
+                }
+                $fragment = $this->localFragment($ref);
+                if ($fragment !== null && str_starts_with($fragment, $prefix)
+                    && isset($surviving[substr($fragment, strlen($prefix))])
+                ) {
+                    $surviving[$key] = true;
+                    $changed = true;
+                }
+            }
+        } while ($changed);
+
+        return $surviving;
+    }
+
+    /**
+     * Whether a Path Item Object has at least one operation that survives the tag
+     * rule for reusable/callback operations: an untagged operation (rides with the
+     * granted parent) or one carrying a granted tag.
+     *
+     * @param  array<array-key, mixed>  $pathItem
+     * @param  array<string, int>  $tagSet
+     */
+    private function pathItemHasSurvivingOperation(array $pathItem, array $tagSet): bool
+    {
+        foreach ($pathItem as $field => $value) {
+            if (! is_string($field) || ! in_array($field, self::HTTP_VERBS, true)) {
+                continue;
+            }
+            $operationTags = array_values(array_filter(
+                $this->asArray($this->asArray($value)['tags'] ?? null),
+                static fn (mixed $t): bool => is_string($t),
+            ));
+            if ($operationTags === [] || array_intersect_key($tagSet, array_flip($operationTags)) !== []) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1906,9 +2012,10 @@ final class OpenApiSpecService
      * @param  array<string, true>  $usedTags  (by-ref accumulator)
      * @param  'paths'|'webhooks'  $container  namespaces webhook endpoint grants
      * @param  array<array-key, mixed>  $pathItemComponents  components.pathItems (for $ref resolution)
+     * @param  array<string, true>  $survivingPathItems  reusable path items with a surviving op
      * @return array<string, mixed>
      */
-    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags, string $container, array $pathItemComponents): array
+    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags, string $container, array $pathItemComponents, array $survivingPathItems): array
     {
         $result = [];
 
@@ -1939,7 +2046,7 @@ final class OpenApiSpecService
 
                 // Keep the operation, but tag-filter its inline callbacks so an
                 // other-audience (e.g. Admin) callback operation can't ride along.
-                $kept[$field] = $this->filterOperationCallbacks($value, $tagSet, $usedTags);
+                $kept[$field] = $this->filterOperationCallbacks($value, $tagSet, $usedTags, $survivingPathItems);
                 foreach ($operationTags as $name) {
                     $usedTags[$name] = true;
                 }
