@@ -309,6 +309,15 @@ final class OpenApiSpecService
         // pass removes anything now orphaned by the link removal.
         $spec = $this->pruneComponents($spec);
 
+        // `paths` is an OpenAPI MAP and must serialize as a JSON object. When a user
+        // has no surviving path operations (e.g. webhook-only or no grants) the
+        // filtered map is empty; left as a PHP [] it would json_encode to "[]",
+        // producing an invalid document validators/Scalar reject. Force the object
+        // form. (Done last, so the array-based pruning above is unaffected.)
+        if (($spec['paths'] ?? null) === []) {
+            $spec['paths'] = (object) [];
+        }
+
         return $spec;
     }
 
@@ -1326,7 +1335,7 @@ final class OpenApiSpecService
      *
      * @return array{refs: list<string>, anchors: list<string>}
      */
-    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false, bool $inSchema = false): array
+    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false, bool $inSchema = false, bool $securityIsRequirement = false): array
     {
         $refs = [];
         $anchors = [];
@@ -1380,7 +1389,7 @@ final class OpenApiSpecService
             $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $securityIsRequirement) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1418,13 +1427,14 @@ final class OpenApiSpecService
                     }
 
                     // `security` keyword: an OpenAPI Security Requirement array
-                    // referencing schemes by name (leaf data — no nested refs).
-                    // It is a requirement ONLY outside a Schema Object (root /
-                    // operation position). A non-standard `security` annotation
-                    // INSIDE a schema is not a real keyword — treat it as opaque
-                    // data so it can't mark (leak) an unrelated securityScheme.
+                    // referencing schemes by name (leaf data — no nested refs). It
+                    // is a requirement ONLY as a direct child of an Operation Object
+                    // ($securityIsRequirement; root security is seeded separately).
+                    // A `security` member anywhere else (a response/header/parameter/
+                    // link, or inside a schema) is non-standard data and must NOT
+                    // mark (leak) a securityScheme — so we skip it as opaque data.
                     if ($key === 'security') {
-                        if (! $inSchema) {
+                        if ($securityIsRequirement) {
                             foreach ($this->securityRequirementSchemes($child) as $name) {
                                 $refs[] = 'securitySchemes/'.$name;
                             }
@@ -1468,8 +1478,10 @@ final class OpenApiSpecService
                             foreach ($callback as $pathItem) {
                                 // Each value is a callback path item — a path-item
                                 // position (not a schema), so its top-level $ref may
-                                // reuse a pathItems component.
-                                $walk($pathItem, false, true, false);
+                                // reuse a pathItems component. Its verb children are
+                                // operations (security-requirement context starts at
+                                // the verb level, computed in the generic recursion).
+                                $walk($pathItem, false, true, false, false);
                             }
                         }
 
@@ -1541,11 +1553,15 @@ final class OpenApiSpecService
                     || in_array($keyStr, $schemaSubMaps, true)
                     || in_array($keyStr, $schemaSubKeys, true)
                 ));
-                $walk($child, $childKeysAreNames, false, $childInSchema); // sub-content is not a path-item position
+                // A child keyed by an HTTP verb (in keyword position) is an
+                // Operation Object: its DIRECT `security` is a real requirement.
+                // The flag is single-level — operations' sub-objects reset it.
+                $childSecurityIsRequirement = ! $keysAreNames && in_array($keyStr, self::HTTP_VERBS, true);
+                $walk($child, $childKeysAreNames, false, $childInSchema, $childSecurityIsRequirement); // sub-content is not a path-item position
             }
         };
 
-        $walk($node, $keysAreNames, $pathItemContext, $inSchema);
+        $walk($node, $keysAreNames, $pathItemContext, $inSchema, $securityIsRequirement);
 
         return ['refs' => $refs, 'anchors' => $anchors];
     }

@@ -112,7 +112,7 @@ it('exposes a tagless operation only via explicit endpoint grant', function () {
 it('returns an empty paths set when no grant is present', function () {
     $filtered = spec()->filterForUser(fixtureSpec(), collect([]), collect([]));
 
-    expect($filtered['paths'])->toBe([])
+    expect($filtered['paths'])->toEqual((object) []) // empty paths is a JSON object, not []
         ->and($filtered['tags'])->toBe([])
         ->and($filtered)->not->toHaveKey('components');
 });

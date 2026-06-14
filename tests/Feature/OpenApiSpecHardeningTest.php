@@ -207,7 +207,7 @@ class OpenApiSpecHardeningTest extends TestCase
     {
         $filtered = $this->service()->filterForUser($this->spec31(), collect(['Webhooks']), collect([]));
 
-        expect($filtered['paths'])->toBe([])
+        expect($filtered['paths'])->toEqual((object) []) // empty paths is a JSON object, not []
             ->and(array_keys($filtered['webhooks']))->toBe(['newOrder'])
             ->and(array_keys($filtered['components']['schemas']))->toBe(['WebhookPayload'])
             // newOrder has no own security, so it inherits the root requirement,
@@ -220,7 +220,7 @@ class OpenApiSpecHardeningTest extends TestCase
     {
         $filtered = $this->service()->filterForUser($this->spec31(), collect([]), collect([]));
 
-        expect($filtered['paths'])->toBe([])
+        expect($filtered['paths'])->toEqual((object) []) // empty paths is a JSON object, not []
             ->and($filtered)->not->toHaveKey('webhooks');
     }
 
@@ -271,7 +271,7 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($byPath)->not->toHaveKey('webhooks');
 
         $byWebhook = $this->service()->filterForUser($spec, collect([]), collect(['POST webhook:/orders']));
-        expect($byWebhook['paths'])->toBe([])
+        expect($byWebhook['paths'])->toEqual((object) []) // empty paths is a JSON object, not []
             ->and(array_keys($byWebhook['webhooks']))->toBe(['/orders']);
     }
 
@@ -449,7 +449,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect([]), collect(['GET /ext']));
 
-        expect($filtered['paths'])->toBe([]);
+        expect($filtered['paths'])->toEqual((object) []); // empty paths is a JSON object, not []
     }
 
     public function test_metadata_includes_referenced_path_item_operations(): void
@@ -1913,6 +1913,69 @@ class OpenApiSpecHardeningTest extends TestCase
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
         expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
+    }
+
+    public function test_security_in_a_response_object_does_not_keep_a_security_scheme(): void
+    {
+        // `security` is a Security Requirement only on an Operation Object. A
+        // non-standard `security` on a granted RESPONSE (walked under a surviving
+        // op but not at operation level) must not mark/keep an unreferenced scheme.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => [
+                    'description' => 'ok',
+                    'security' => [['InternalOAuth' => []]],
+                ]],
+            ]]],
+            'components' => ['securitySchemes' => [
+                'InternalOAuth' => ['type' => 'http', 'scheme' => 'bearer'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
+    }
+
+    public function test_operation_level_security_scheme_is_kept(): void
+    {
+        // Regression for the security-position fix: an OPERATION's own `security`
+        // requirement must still keep its scheme reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'security' => [['ApiKeyAuth' => []]],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]],
+            'components' => ['securitySchemes' => [
+                'ApiKeyAuth' => ['type' => 'apiKey', 'in' => 'header', 'name' => 'X-Key'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['securitySchemes']))->toBe(['ApiKeyAuth']);
+    }
+
+    public function test_empty_paths_is_encoded_as_a_json_object(): void
+    {
+        // OpenAPI requires `paths` to be an object; an emptied paths map must
+        // serialize as "{}", not "[]" (which validators/Scalar reject).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths'])->toEqual((object) [])
+            ->and(json_encode($filtered['paths']))->toBe('{}');
     }
 
     public function test_drops_link_with_percent_encoded_operationref_to_filtered_operation(): void
