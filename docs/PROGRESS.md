@@ -146,7 +146,8 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - **`e3fe9ff`→`f92381f` (1 P1 + 1 P2):** (gli) callback-object `$ref` siblings weren't filtered (early-return on `$ref`) → Admin sibling leaked; now alias preserved + siblings filtered. (glk) field-stripping over-pruned an alias whose target survives. Both fixed by computing a "surviving reusable path items" set (with `$ref` alias fixpoint) threaded through the filters — alias path item keeps fields iff target survives, drops them otherwise (no leak). Pest 178/178, PHPStan max 0, Pint clean.
 - **`f92381f`→`f4230e6` (2 P2, reachability counterpart):** now that callback `$ref` siblings are preserved by filtering, reachability must also walk them — `walkReachability` inline callbacks + `drainReachability` components.callbacks now collect the alias AND walk every sibling expression path item, so a surviving sibling's schema isn't pruned (dangling). Pest 180/180, PHPStan max 0, Pint clean.
 - **`f4230e6`→`2ee7e8f` (2 P2):** (atbW) `callbacks` reachability now gated on operation context (flag renamed `$securityIsRequirement`→`$inOperation`, shared by `security`+`callbacks`) — a `callbacks` member in a response/schema is opaque data, no longer marks components.callbacks reachable. (atbX) a callback `$ref` to a non-callback component is dropped (else dangling). Pest 182/182, PHPStan max 0, Pint clean.
-- **Awaiting:** Codex review of `2ee7e8f`.
+- **`2ee7e8f`→`fa311b5` (2 P2):** (azQi) in-schema opaque-data skip now covers ALL OpenAPI-only keyed maps (responses/headers/content/encoding/variables/scopes, not just links/callbacks) — a schema-level `responses` annotation no longer leaks components. (azQl) `extractTags` now collects callback/reusable-component operation tags (recursively) so a callback-only tag is grantable. Pest 184/184, PHPStan max 0, Pint clean.
+- **Awaiting:** Codex review of `fa311b5`.
 
 ## T5 — task/scalar-proxy
 _Not started._
