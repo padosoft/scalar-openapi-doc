@@ -278,6 +278,15 @@ final class OpenApiSpecService
             }
         }
 
+        // Filter operations INSIDE reusable components.pathItems too. A path item
+        // reached only via a granted operation's callback/link is kept whole by the
+        // reachability prune, so without this an extra operation in that reusable
+        // entry (tagged for another audience) would ship to the browser. Reusable
+        // path-item operations have no canonical endpoint path, so only a TAG grant
+        // can authorize them. (The unfiltered $pathItemComponents captured above is
+        // untouched, so endpoint-granted top-level $ref'd paths still resolve fully.)
+        $spec = $this->filterComponentPathItemOperations($spec, $tagSet, $usedTags);
+
         // Top-level tag cleanup.
         if (isset($spec['tags']) && is_array($spec['tags'])) {
             $spec['tags'] = array_values(array_filter(
@@ -560,7 +569,10 @@ final class OpenApiSpecService
                         $links[$name] = $link;
                     }
                 }
-                $response['links'] = $links;
+                // `links` is an OpenAPI map and must serialize as a JSON object. If
+                // every link was dropped (all targets filtered out), an empty PHP []
+                // would emit "links": [] — invalid; force the object form.
+                $response['links'] = $links === [] ? (object) [] : $links;
             }
             $result[$code] = $response;
         }
@@ -1724,6 +1736,67 @@ final class OpenApiSpecService
         }
 
         return false;
+    }
+
+    /**
+     * Filters operations inside reusable `components.pathItems` by tag grant, so a
+     * path item kept only because a granted operation's callback/link reaches it
+     * cannot ship an ungranted (other-audience) operation to the browser. Reusable
+     * path items have no canonical endpoint path, so endpoint grants cannot apply —
+     * tag is the only authorizing grant. Entries are kept (structure/refs intact)
+     * even when emptied of operations; orphaned schemas are removed by the prune
+     * pass that follows. The $ref-resolution source captured earlier is untouched.
+     *
+     * @param  array<string, mixed>  $spec
+     * @param  array<string, int>  $tagSet
+     * @param  array<string, true>  $usedTags
+     * @return array<string, mixed>
+     */
+    private function filterComponentPathItemOperations(array $spec, array $tagSet, array &$usedTags): array
+    {
+        $components = $spec['components'] ?? null;
+        if (! is_array($components)) {
+            return $spec;
+        }
+        $pathItems = $components['pathItems'] ?? null;
+        if (! is_array($pathItems)) {
+            return $spec;
+        }
+
+        $rebuilt = [];
+        foreach ($pathItems as $name => $pathItem) {
+            if (! is_array($pathItem)) {
+                $rebuilt[$name] = $pathItem;
+
+                continue;
+            }
+            $kept = [];
+            foreach ($pathItem as $field => $value) {
+                $verb = is_string($field) ? $field : '';
+                if (! in_array($verb, self::HTTP_VERBS, true)) {
+                    $kept[$field] = $value; // non-operation field (parameters/$ref/…)
+
+                    continue;
+                }
+                $operationTags = array_values(array_filter(
+                    $this->asArray($this->asArray($value)['tags'] ?? null),
+                    static fn (mixed $t): bool => is_string($t),
+                ));
+                if (array_intersect_key($tagSet, array_flip($operationTags)) === []) {
+                    continue; // not granted by tag — drop this reusable operation
+                }
+                $kept[$field] = $value;
+                foreach ($operationTags as $t) {
+                    $usedTags[$t] = true;
+                }
+            }
+            $rebuilt[$name] = $kept;
+        }
+
+        $components['pathItems'] = $rebuilt;
+        $spec['components'] = $components;
+
+        return $spec;
     }
 
     /**

@@ -600,7 +600,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_drops_link_with_ref_and_hidden_sibling_operationref(): void
@@ -625,7 +625,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_drops_link_when_operationref_hidden_despite_valid_operationid(): void
@@ -649,7 +649,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_drops_link_with_malformed_local_operationref(): void
@@ -669,7 +669,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_false_anchor_in_example_data_is_ignored(): void
@@ -805,7 +805,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_generic_ref_to_path_item_does_not_keep_it(): void
@@ -880,7 +880,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_normalizes_uri_case_and_default_port(): void
@@ -904,7 +904,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_normalizes_absolute_operationref_to_current_document(): void
@@ -929,7 +929,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_same_name_sibling_in_other_directory_is_external(): void
@@ -1293,8 +1293,8 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([])
-            ->and($filtered['paths']['/a']['get']['callbacks']['cb']['{$request.body#/u}']['post']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) [])
+            ->and($filtered['paths']['/a']['get']['callbacks']['cb']['{$request.body#/u}']['post']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_reprunes_components_orphaned_by_dropped_links(): void
@@ -1324,7 +1324,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([])
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) [])
             ->and($filtered['components'] ?? [])->toBe([]);
     }
 
@@ -1372,7 +1372,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_response_header_named_like_a_keyword_is_walked(): void
@@ -1786,7 +1786,7 @@ class OpenApiSpecHardeningTest extends TestCase
 
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
-        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([])
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) [])
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas')
             ->and($filtered['components']['links'] ?? [])->not->toHaveKey('AliasToInternal');
     }
@@ -1913,6 +1913,69 @@ class OpenApiSpecHardeningTest extends TestCase
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
         expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
+    }
+
+    public function test_reusable_callback_path_item_drops_ungranted_operations(): void
+    {
+        // A components.pathItems reached only via a granted operation's callback is
+        // kept by the prune, but it must NOT ship an extra operation tagged for
+        // another audience. Reusable path-item ops are tag-authorized only.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => [
+                    '{$req}' => ['$ref' => '#/components/pathItems/Reused'],
+                ]],
+            ]]],
+            'components' => [
+                'pathItems' => ['Reused' => [
+                    'get' => ['tags' => ['Orders'], 'operationId' => 'reusedGet', 'responses' => ['200' => ['description' => 'ok']]],
+                    'post' => [
+                        'tags' => ['Admin'],
+                        'operationId' => 'hiddenPost',
+                        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret']]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ],
+                ]],
+                'schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['pathItems']['Reused'])->toHaveKey('get')
+            ->and($filtered['components']['pathItems']['Reused'])->not->toHaveKey('post')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_empty_links_map_is_encoded_as_a_json_object(): void
+    {
+        // When every link in a response targets a filtered-out operation, the
+        // emptied `links` map must serialize as "{}" (a JSON object), not "[]".
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'operationId' => 'getA',
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toAdmin' => ['operationId' => 'adminOp'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'operationId' => 'adminOp', 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $links = $filtered['paths']['/a']['get']['responses']['200']['links'];
+        expect($links)->toEqual((object) [])
+            ->and(json_encode($links))->toBe('{}');
     }
 
     public function test_security_in_a_response_object_does_not_keep_a_security_scheme(): void
@@ -2134,7 +2197,7 @@ class OpenApiSpecHardeningTest extends TestCase
         $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
 
         expect($filtered['paths'])->not->toHaveKey('/admin')
-            ->and($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+            ->and($filtered['paths']['/a']['get']['responses']['200']['links'])->toEqual((object) []);
     }
 
     public function test_keeps_link_with_percent_encoded_operationref_to_granted_operation(): void
