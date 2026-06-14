@@ -363,15 +363,16 @@ final class OpenApiSpecService
 
         // Seed reachability from $refs under paths AND webhooks (path-item-level
         // $refs are covered too — collectComponentRefs walks the whole subtree).
+        // securitySchemes are referenced by NAME via `security` (not by $ref), so
+        // they are collected separately and seeded from operations + root.
         $reachable = [];                                   // "schemas/Foo" => true
         $queue = [
             ...$this->collectComponentRefs($spec['paths'] ?? []),
             ...$this->collectComponentRefs($spec['webhooks'] ?? []),
+            ...$this->collectSecuritySchemeRefs($spec['paths'] ?? []),
+            ...$this->collectSecuritySchemeRefs($spec['webhooks'] ?? []),
         ];
-
-        // securitySchemes are referenced by NAME via `security` (not by $ref), so
-        // seed them explicitly from the surviving operations + the root security.
-        foreach ($this->securitySchemeNames($spec) as $schemeName) {
+        foreach ($this->securityRequirementSchemes($spec['security'] ?? null) as $schemeName) {
             $queue[] = 'securitySchemes/'.$schemeName;
         }
 
@@ -392,7 +393,10 @@ final class OpenApiSpecService
                 continue;
             }
 
-            foreach ($this->collectComponentRefs($component) as $child) {
+            // Follow both $ref children AND security-scheme names declared inside
+            // this reachable component (e.g. a callback/pathItem operation's
+            // `security`), so callback-only schemes are kept, not pruned.
+            foreach ([...$this->collectComponentRefs($component), ...$this->collectSecuritySchemeRefs($component)] as $child) {
                 if (! isset($reachable[$child])) {
                     $queue[] = $child;
                 }
@@ -428,7 +432,13 @@ final class OpenApiSpecService
     }
 
     /**
-     * Collects internal component references ("schemas/Foo") present in a node.
+     * Collects the OWNING component references ("schemas/Foo") present in a node.
+     *
+     * A $ref may be a JSON Pointer into a component (e.g.
+     * "#/components/schemas/Pet/properties/id" or ".../Pet/$defs/Id"); only the
+     * first segment after the bucket is the component key, so we normalise to
+     * "schemas/Pet" — otherwise the owning component is never marked reachable
+     * and gets pruned, leaving a dangling $ref.
      *
      * @return list<string>
      */
@@ -443,7 +453,10 @@ final class OpenApiSpecService
             }
             foreach ($value as $key => $child) {
                 if ($key === '$ref' && is_string($child) && str_starts_with($child, $prefix)) {
-                    $refs[] = substr($child, strlen($prefix));
+                    $segments = explode('/', substr($child, strlen($prefix)));
+                    if (count($segments) >= 2) {
+                        $refs[] = $segments[0].'/'.$segments[1]; // owning "type/name"
+                    }
 
                     continue;
                 }
@@ -454,6 +467,58 @@ final class OpenApiSpecService
         $walk($node);
 
         return $refs;
+    }
+
+    /**
+     * Collects "securitySchemes/<name>" for every scheme named in any `security`
+     * requirement found anywhere within a node (operations, callback operations,
+     * reusable path items). Security schemes are referenced by NAME, not $ref, so
+     * the reachability closure must collect them separately.
+     *
+     * @return list<string>
+     */
+    private function collectSecuritySchemeRefs(mixed $node): array
+    {
+        $refs = [];
+
+        $walk = function (mixed $value) use (&$walk, &$refs): void {
+            if (! is_array($value)) {
+                return;
+            }
+            foreach ($value as $key => $child) {
+                if ($key === 'security') {
+                    foreach ($this->securityRequirementSchemes($child) as $name) {
+                        $refs[] = 'securitySchemes/'.$name;
+                    }
+
+                    continue; // `security` holds requirement data, not nested refs
+                }
+                $walk($child);
+            }
+        };
+
+        $walk($node);
+
+        return $refs;
+    }
+
+    /**
+     * Scheme names from a Security Requirement array ([{Scheme: [scopes]}, …]).
+     *
+     * @return list<string>
+     */
+    private function securityRequirementSchemes(mixed $security): array
+    {
+        $names = [];
+        foreach ($this->asArray($security) as $requirement) {
+            foreach ($this->asArray($requirement) as $schemeName => $scopes) {
+                if (is_string($schemeName)) {
+                    $names[] = $schemeName;
+                }
+            }
+        }
+
+        return $names;
     }
 
     // ---------------------------------------------------------------------
@@ -478,51 +543,6 @@ final class OpenApiSpecService
         }
 
         return $operations;
-    }
-
-    /**
-     * Security scheme names actually reachable from the (already-filtered) spec.
-     * These reference `components.securitySchemes.<name>` by name, not by $ref.
-     *
-     * An operation with its own `security` key overrides the root requirement
-     * (including `security: []`, an explicit opt-out); an operation without one
-     * inherits the root `security`. So the root-level schemes are reachable only
-     * when at least one surviving operation inherits them — otherwise (e.g. a
-     * non-admin left with zero operations) they must NOT keep the root schemes
-     * alive during pruning.
-     *
-     * @param  array<array-key, mixed>  $spec
-     * @return list<string>
-     */
-    private function securitySchemeNames(array $spec): array
-    {
-        $names = [];
-
-        $collect = function (mixed $security) use (&$names): void {
-            foreach ($this->asArray($security) as $requirement) {
-                foreach ($this->asArray($requirement) as $schemeName => $scopes) {
-                    if (is_string($schemeName)) {
-                        $names[$schemeName] = true;
-                    }
-                }
-            }
-        };
-
-        foreach (['paths', 'webhooks'] as $container) {
-            foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
-                foreach ($this->operations($pathItem) as $operation) {
-                    if (array_key_exists('security', $operation)) {
-                        $collect($operation['security']);
-                    }
-                }
-            }
-        }
-
-        if ($this->inheritsRootSecurity($spec)) {
-            $collect($spec['security'] ?? null);
-        }
-
-        return array_keys($names);
     }
 
     /**

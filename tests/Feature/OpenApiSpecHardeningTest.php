@@ -425,6 +425,57 @@ class OpenApiSpecHardeningTest extends TestCase
             ->toContain('GET /reused')->toContain('DELETE /reused');
     }
 
+    public function test_keeps_owning_component_for_a_nested_pointer_ref(): void
+    {
+        // A $ref into a sub-schema (#/components/schemas/Pet/properties/id) must
+        // keep the OWNING Pet schema reachable, not look up "Pet/properties/id".
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Pet/properties/id'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Pet' => ['type' => 'object', 'properties' => ['id' => ['type' => 'integer']]],
+                'Unused' => ['type' => 'string'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
+    }
+
+    public function test_keeps_security_scheme_used_only_by_a_granted_callback(): void
+    {
+        // A granted operation's callback operation declares security: [{CallbackAuth}].
+        // The scheme is referenced by name, so the reachability closure must keep
+        // it (else a dangling security requirement); UnusedAuth is pruned.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['{$request.body#/cb}' => ['post' => [
+                    'security' => [['CallbackAuth' => []]],
+                    'responses' => ['200' => ['description' => 'ack']],
+                ]]]],
+            ]]],
+            'components' => ['securitySchemes' => [
+                'CallbackAuth' => ['type' => 'http', 'scheme' => 'bearer'],
+                'UnusedAuth' => ['type' => 'apiKey', 'in' => 'header', 'name' => 'X'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['securitySchemes']))->toBe(['CallbackAuth']);
+    }
+
     // ---- B7: injectServers validation -------------------------------------
 
     public function test_inject_servers_skips_malformed_entries(): void
