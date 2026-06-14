@@ -586,24 +586,31 @@ final class OpenApiSpecService
     }
 
     /**
-     * Whether an `operationRef` targets a surviving operation. Handles the LOCAL
-     * forms — "#/paths/<escaped-path>/<method>", "#/webhooks/<key>/<method>" and
-     * "#/components/pathItems/<name>/<method>" — checked against the location set.
-     * Any OTHER local "#/components/…" ref (e.g. into a callback, which can't be
-     * unambiguously resolved) is dropped conservatively; external/unknown refs
-     * are left untouched.
+     * Whether an `operationRef` targets a surviving operation. Resolution is done
+     * on the URI FRAGMENT (everything after '#'), so a relative same-document ref
+     * (e.g. "./openapi.json#/paths/~1admin/get") is matched the same as the bare
+     * "#/paths/…" form — preventing a hidden path/key from leaking through a
+     * filename-prefixed ref. A fragment that points at a local operation but does
+     * not resolve to a surviving one is dropped; a fragment that isn't a
+     * recognizable local operation pointer is treated as external (kept).
      *
      * @param  array<string, true>  $locations
      */
     private function operationRefSurvives(string $operationRef, array $locations): bool
     {
+        $hash = strpos($operationRef, '#');
+        if ($hash === false) {
+            return true; // no fragment — external, not a local-operation leak
+        }
+        $fragment = substr($operationRef, $hash + 1);
+
         foreach (['paths', 'webhooks'] as $container) {
-            $prefix = '#/'.$container.'/';
-            if (! str_starts_with($operationRef, $prefix)) {
+            $prefix = '/'.$container.'/';
+            if (! str_starts_with($fragment, $prefix)) {
                 continue;
             }
 
-            $rest = substr($operationRef, strlen($prefix));
+            $rest = substr($fragment, strlen($prefix));
             $pos = strrpos($rest, '/'); // path/key may contain '/'; method is last
             if ($pos === false) {
                 return false; // malformed local ref (no method) — drop conservatively
@@ -615,9 +622,8 @@ final class OpenApiSpecService
             return isset($locations[$container."\t".$method."\t".$key]);
         }
 
-        $pathItemPrefix = '#/components/pathItems/';
-        if (str_starts_with($operationRef, $pathItemPrefix)) {
-            $rest = substr($operationRef, strlen($pathItemPrefix));
+        if (str_starts_with($fragment, '/components/pathItems/')) {
+            $rest = substr($fragment, strlen('/components/pathItems/'));
             $pos = strpos($rest, '/'); // a component name has no '/'
             if ($pos === false) {
                 return false;
@@ -631,11 +637,11 @@ final class OpenApiSpecService
             return isset($locations['components.pathItems'."\t".$method."\t".$name]);
         }
 
-        if (str_starts_with($operationRef, '#/components/')) {
+        if (str_starts_with($fragment, '/components/')) {
             return false; // other local component op ref we can't safely resolve
         }
 
-        return true; // external/unknown operationRef — leave as-is
+        return true; // fragment isn't a recognizable local operation pointer
     }
 
     /**

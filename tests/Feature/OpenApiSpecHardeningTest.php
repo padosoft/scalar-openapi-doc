@@ -578,6 +578,30 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->toBe([]);
     }
 
+    public function test_drops_link_with_relative_same_document_operationref(): void
+    {
+        // A relative same-document operationRef ("./openapi.json#/paths/...") to a
+        // filtered-out op must be dropped (resolved by fragment), not kept as
+        // external — otherwise the hidden path leaks.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toAdmin' => ['operationRef' => './openapi.json#/paths/~1admin/get'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_drops_link_with_malformed_local_operationref(): void
     {
         // A local operationRef with no method segment can't resolve — drop the
