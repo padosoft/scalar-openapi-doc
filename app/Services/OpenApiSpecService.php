@@ -996,9 +996,16 @@ final class OpenApiSpecService
         $refs = [];
         $prefix = '#/components/';
 
-        // JSON Schema maps whose keys are arbitrary NAMES (so a key like
-        // "example"/"security" there is a property name, not a keyword).
-        $nameMaps = ['properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas'];
+        // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"
+        // there is a name, not a keyword): JSON Schema schema-maps plus the
+        // OpenAPI keyed maps (headers/content/encoding/links/callbacks/server
+        // variables). callbacks nests one more name level (callbackName →
+        // expression → path item), which the one-level flag handles since the
+        // path item is then walked in keyword position.
+        $nameMaps = [
+            'properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas',
+            'headers', 'content', 'encoding', 'links', 'callbacks', 'variables',
+        ];
 
         $addComponent = static function (mixed $ref) use (&$refs, $prefix): void {
             if (is_string($ref) && str_starts_with($ref, $prefix)) {

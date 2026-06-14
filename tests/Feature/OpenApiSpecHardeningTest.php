@@ -745,6 +745,27 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_response_header_named_like_a_keyword_is_walked(): void
+    {
+        // A response header named "example" must be walked as a header name, not
+        // the example keyword, so its schema $ref keeps the component reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'headers' => [
+                    'example' => ['schema' => ['$ref' => '#/components/schemas/HeaderValue']],
+                ]]],
+            ]]],
+            'components' => ['schemas' => ['HeaderValue' => ['type' => 'string'], 'Unused' => ['type' => 'integer']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['HeaderValue']);
+    }
+
     public function test_webhook_named_like_a_keyword_is_still_walked(): void
     {
         // A webhook named "security" must be walked as a name, not misread as the
