@@ -590,11 +590,13 @@ final class OpenApiSpecService
 
     /**
      * The same-document JSON-pointer fragment of a ref, or null if the ref is
-     * external (has a URI scheme or "//" authority) or has no fragment.
+     * external or has no fragment.
      *
-     * A pure fragment ("#/…") and a relative reference ("./file#/…", "x#/…") are
-     * treated as same-document (the served spec is one bundled document); an
-     * absolute URI ("https://other#/…") targets a different document.
+     * A pure fragment ("#/…") is always same-document. A BASED ref ("./file#/…",
+     * "https://host/doc#/…") is same-document only when its base resolves to the
+     * configured upstream document — a sibling file ("./common.yaml#/…") or a
+     * different host targets ANOTHER document, so its local-looking fragment must
+     * NOT keep/resolve our local components.
      */
     private function localFragment(string $ref): ?string
     {
@@ -604,11 +606,50 @@ final class OpenApiSpecService
         }
 
         $base = substr($ref, 0, $hash);
-        if ($base !== '' && (str_starts_with($base, '//') || preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $base) === 1)) {
-            return null; // external URI (scheme/authority) — not same-document
+        if ($base === '') {
+            return substr($ref, $hash + 1); // pure fragment — same document
         }
 
-        return substr($ref, $hash + 1);
+        return $this->refBaseIsCurrentDocument($base) ? substr($ref, $hash + 1) : null;
+    }
+
+    /**
+     * Whether a ref's base (the part before '#') resolves to the configured
+     * upstream document. An absolute base must equal the upstream URL (sans
+     * query/fragment); a relative base must name the same document file.
+     */
+    private function refBaseIsCurrentDocument(string $base): bool
+    {
+        $upstream = config('openapi.upstream_url');
+        if (! is_string($upstream) || $upstream === '') {
+            return false;
+        }
+
+        $upstreamDoc = $this->documentName($upstream);
+        if ($upstreamDoc === '') {
+            return false;
+        }
+
+        if (str_starts_with($base, '//') || preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $base) === 1) {
+            // Absolute / protocol-relative base — same doc only if it IS the upstream.
+            return $this->stripQueryFragment($base) === $this->stripQueryFragment($upstream);
+        }
+
+        // Relative base — compare document file names.
+        return $this->documentName($base) === $upstreamDoc;
+    }
+
+    private function stripQueryFragment(string $url): string
+    {
+        return explode('#', explode('?', $url)[0])[0];
+    }
+
+    private function documentName(string $url): string
+    {
+        $path = rtrim($this->stripQueryFragment($url), '/');
+        $pos = strrpos($path, '/');
+
+        return $pos === false ? $path : substr($path, $pos + 1);
     }
 
     /**
@@ -916,11 +957,15 @@ final class OpenApiSpecService
         // keeps the anchored component reachable instead of dangling.
         $anchorOwners = [];
         foreach ($components as $type => $entries) {
-            // Anchors ($anchor/$dynamicAnchor) only live in SCHEMA objects, so
-            // component types that hold no schemas (Example/Link/SecurityScheme)
-            // can't declare a real anchor — skip them to avoid false owners from
-            // their data payloads.
-            if (! is_array($entries) || in_array((string) $type, ['examples', 'links', 'securitySchemes'], true)) {
+            // Skip component types that either hold no schema anchors
+            // (Example/Link/SecurityScheme) or are OPERATION-bearing
+            // (pathItems/callbacks) — promoting a whole path item/callback just
+            // because a nested schema declares an anchor would expose its
+            // ungranted operations (P1). Anchors are resolved via schema-only
+            // component types (schemas/responses/parameters/headers/requestBodies).
+            if (! is_array($entries)
+                || in_array((string) $type, ['examples', 'links', 'securitySchemes', 'pathItems', 'callbacks'], true)
+            ) {
                 continue;
             }
             foreach ($entries as $name => $entry) {

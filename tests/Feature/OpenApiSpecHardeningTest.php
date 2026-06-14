@@ -583,6 +583,7 @@ class OpenApiSpecHardeningTest extends TestCase
         // A relative same-document operationRef ("./openapi.json#/paths/...") to a
         // filtered-out op must be dropped (resolved by fragment), not kept as
         // external — otherwise the hidden path leaks.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
         $spec = [
             'openapi' => '3.1.0',
             'info' => ['title' => 't', 'version' => '1'],
@@ -716,6 +717,7 @@ class OpenApiSpecHardeningTest extends TestCase
     public function test_resolves_relative_same_document_path_item_ref(): void
     {
         // A filename-prefixed same-document path-item ref must resolve and inline.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
         $spec = [
             'openapi' => '3.1.0',
             'info' => ['title' => 't', 'version' => '1'],
@@ -736,6 +738,7 @@ class OpenApiSpecHardeningTest extends TestCase
     {
         // A relative component-link ref (./openapi.json#/components/links/X) whose
         // target link points at a filtered operation must be dropped, not kept.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
         $spec = [
             'openapi' => '3.1.0',
             'info' => ['title' => 't', 'version' => '1'],
@@ -756,10 +759,59 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_sibling_relative_ref_is_external(): void
+    {
+        // A relative ref to a SIBLING file ("./common.yaml#/...") targets another
+        // document, so it must not keep our same-named local component reachable.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => './common.yaml#/components/schemas/Internal'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Internal' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
+    public function test_anchor_in_unreferenced_path_item_does_not_promote_it(): void
+    {
+        // A $dynamicAnchor declared in a schema nested in an UNREFERENCED
+        // components.pathItems must NOT make a $dynamicRef pull the whole path
+        // item (with its ungranted operations) into the filtered spec.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$dynamicRef' => '#node'],
+                ]]]],
+            ]]],
+            'components' => ['pathItems' => ['Hidden' => ['get' => [
+                'tags' => ['Admin'],
+                'requestBody' => ['content' => ['application/json' => ['schema' => ['$dynamicAnchor' => 'node']]]],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['pathItems'] ?? [])->toBe([]);
+    }
+
     public function test_keeps_component_for_relative_same_document_ref(): void
     {
         // A filename-prefixed same-document $ref ("./openapi.json#/components/...")
         // must keep its target component reachable, like the bare "#/components/" form.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
         $spec = [
             'openapi' => '3.1.0',
             'info' => ['title' => 't', 'version' => '1'],
