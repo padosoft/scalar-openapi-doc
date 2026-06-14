@@ -2084,6 +2084,74 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_schema_annotation_objects_are_opaque(): void
+    {
+        // xml/externalDocs (and any non-JSON-Schema annotation object) inside a
+        // Schema Object are opaque data — their $refs must not keep components.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'xml' => ['$ref' => '#/components/schemas/Secret'],
+                        'externalDocs' => ['url' => 'https://x', 'nested' => ['$ref' => '#/components/schemas/Secret2']],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object'], 'Secret2' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_malformed_anchor_ref_outside_schema_does_not_keep_anchored_schema(): void
+    {
+        // A bare "#secret" $ref in an OpenAPI Reference Object position (a response)
+        // is malformed; it must NOT be read as a JSON-Schema anchor ref and pull in
+        // the schema declaring $anchor: secret.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['$ref' => '#secret']],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['$anchor' => 'secret', 'type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_userinfo_bearing_ref_is_treated_as_external(): void
+    {
+        // Userinfo is part of the authority: "https://creds@host/doc#/..." is a
+        // DIFFERENT resource from the upstream "https://host/doc" and must not keep
+        // local components.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => 'https://creds@specs.example.com/openapi.json#/components/schemas/Secret'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
     public function test_schema_level_schema_annotation_does_not_keep_a_schema(): void
     {
         // A non-standard `schema` key INSIDE a Schema Object is opaque data — its

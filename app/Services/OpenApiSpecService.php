@@ -837,7 +837,19 @@ final class OpenApiSpecService
         $isDefaultPort = ($scheme === 'http' && $port === 80) || ($scheme === 'https' && $port === 443);
         $portStr = ($port !== null && ! $isDefaultPort) ? ':'.$port : '';
 
-        $origin = $scheme.'://'.$host.$portStr;
+        // Userinfo is part of the authority (and case-sensitive): keep it so a ref
+        // like "https://creds@host/doc#/..." is NOT treated as the same document as
+        // the configured upstream "https://host/doc" (which would leak its locals).
+        $userInfo = '';
+        if (isset($parts['user'])) {
+            $userInfo = (string) $parts['user'];
+            if (isset($parts['pass'])) {
+                $userInfo .= ':'.(string) $parts['pass'];
+            }
+            $userInfo .= '@';
+        }
+
+        $origin = $scheme.'://'.$userInfo.$host.$portStr;
         $path = $this->normalizePath(is_string($parts['path'] ?? null) ? $parts['path'] : '/');
         $query = isset($parts['query']) ? '?'.$parts['query'] : '';
 
@@ -1437,15 +1449,17 @@ final class OpenApiSpecService
             'contentSchema', 'not', 'if', 'then', 'else', 'allOf', 'anyOf', 'oneOf',
         ];
 
-        // OpenAPI structural keys that are NOT JSON Schema keywords. Inside a Schema
-        // Object (in keyword position) any of these is a non-standard annotation,
-        // i.e. opaque DATA — it must be skipped so a schema annotation cannot pull
-        // OpenAPI components (a response/header/link/callback and their schemas)
-        // into the filtered spec. (A schema PROPERTY named like one of these lives
-        // under `properties`, where keys are names, so it is unaffected.)
-        $openApiOnlyKeys = [
-            'links', 'callbacks', 'security', 'responses', 'headers', 'content', 'encoding',
-            'variables', 'scopes', 'parameters', 'requestBody', 'schema',
+        // The ONLY ref/anchor-bearing keywords meaningful inside a Schema Object
+        // (besides the subschema keywords below). Inside a schema we process ONLY
+        // these — every OTHER keyword-position member (OpenAPI annotations like
+        // links/responses/parameters, schema annotation objects like xml/
+        // externalDocs, vendor objects, scalars) is opaque DATA and is skipped, so a
+        // schema annotation can never pull components into the filtered spec. (A
+        // schema PROPERTY named like a keyword lives under `properties`, where keys
+        // are names, so it is unaffected.) This allow-list is exhaustive by design:
+        // a new OpenAPI key can't open a leak the way a deny-list would miss it.
+        $schemaKeywords = [
+            '$ref', '$dynamicRef', '$recursiveRef', '$anchor', '$dynamicAnchor', '$recursiveAnchor', 'discriminator',
         ];
 
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"
@@ -1486,7 +1500,7 @@ final class OpenApiSpecService
             $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys, $openApiOnlyKeys): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys, $schemaKeywords): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1499,20 +1513,28 @@ final class OpenApiSpecService
                         continue;
                     }
 
-                    // Inside a Schema Object, any OpenAPI-only structural key is a
-                    // non-standard annotation (opaque data) — skip it so it can't
-                    // pull OpenAPI components (links/callbacks/responses/headers/…
-                    // and their schemas) into the filtered spec.
-                    if ($inSchema && is_string($key) && in_array($key, $openApiOnlyKeys, true)) {
+                    // ALLOW-LIST for Schema Object traversal: inside a schema, process
+                    // ONLY known JSON-Schema keywords (refs/anchors/discriminator here,
+                    // subschema keywords below). Any other keyword-position member is
+                    // opaque annotation/scalar DATA and is skipped, so it can never
+                    // pull a component into the filtered spec.
+                    if ($inSchema && is_string($key)
+                        && ! in_array($key, $schemaKeywords, true)
+                        && ! in_array($key, $schemaSubMaps, true)
+                        && ! in_array($key, $schemaSubKeys, true)
+                    ) {
                         continue;
                     }
 
                     // JSON Schema anchor declarations (resolved by anchor-fragment
-                    // refs). Collected here so anchor scanning shares these guards.
+                    // refs) — ONLY meaningful inside a schema, so an `$anchor` member
+                    // of a non-schema OpenAPI object is not registered as an owner.
                     if (($key === '$anchor' || $key === '$dynamicAnchor' || $key === '$recursiveAnchor')
                         && is_string($child) && $child !== ''
                     ) {
-                        $anchors[] = $child;
+                        if ($inSchema) {
+                            $anchors[] = $child;
+                        }
 
                         continue;
                     }
@@ -1524,8 +1546,11 @@ final class OpenApiSpecService
                         // "#%2Fcomponents%2Fschemas%2FPet" has no literal "/" but is a
                         // component ref, not an anchor — judging the raw string would
                         // record a bogus anchor and prune Pet, leaving a dangling ref.
+                        // A bare "#name" is an ANCHOR ref only inside a schema; in an
+                        // OpenAPI Reference Object it is malformed, so treat it as a
+                        // (non-resolving) component ref rather than an anchor owner.
                         $fragment = is_string($child) ? $this->localFragment($child) : null;
-                        if ($fragment !== null && $fragment !== '' && ! str_contains($fragment, '/')) {
+                        if ($inSchema && $fragment !== null && $fragment !== '' && ! str_contains($fragment, '/')) {
                             // Same-document anchor fragment ("#name") — via anchor decls.
                             $refs[] = self::ANCHOR_REF_PREFIX.$fragment;
                         } else {
