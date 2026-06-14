@@ -564,21 +564,23 @@ final class OpenApiSpecService
             return true;
         }
 
+        // A link survives only if EVERY local target field present resolves to a
+        // surviving target. A malformed upstream link may combine several (a
+        // $ref to a surviving components.link AND a sibling operationId/
+        // operationRef pointing at a filtered, hidden op) — checking only one and
+        // returning early would leak the hidden path, so check ALL present.
         $ref = $link['$ref'] ?? null;
         if (is_string($ref)) {
             $fragmentPrefix = '/components/links/';
             $fragment = $this->localFragment($ref);
-            if ($fragment !== null && str_starts_with($fragment, $fragmentPrefix)) {
-                return isset($survivingLinkNames[substr($fragment, strlen($fragmentPrefix))]);
+            if ($fragment !== null && str_starts_with($fragment, $fragmentPrefix)
+                && ! isset($survivingLinkNames[substr($fragment, strlen($fragmentPrefix))])
+            ) {
+                return false; // local link alias to a dropped components.link
             }
-
-            return true; // external/unknown link ref — leave as-is
+            // external/unknown $ref: not a local leak — fall through to siblings.
         }
 
-        // A link survives only if EVERY local target field present resolves to a
-        // surviving operation. A malformed upstream link may carry BOTH a valid
-        // operationId AND an operationRef pointing at a filtered (hidden) op — if
-        // either resolves to a non-surviving local target, drop the whole link.
         $operationId = $link['operationId'] ?? null;
         if (is_string($operationId) && ! isset($ids[$operationId])) {
             return false;

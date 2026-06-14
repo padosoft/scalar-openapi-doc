@@ -603,6 +603,31 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_drops_link_with_ref_and_hidden_sibling_operationref(): void
+    {
+        // A malformed link combining a surviving $ref with a hidden sibling
+        // operationRef must be dropped (the sibling would leak the hidden path).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'operationId' => 'getA',
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'bad' => ['$ref' => '#/components/links/Safe', 'operationRef' => '#/paths/~1admin/get'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+            'components' => ['links' => ['Safe' => ['operationId' => 'getA']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_drops_link_when_operationref_hidden_despite_valid_operationid(): void
     {
         // A malformed link with a valid operationId AND a hidden operationRef must
