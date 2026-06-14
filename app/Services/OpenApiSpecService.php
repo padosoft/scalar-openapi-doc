@@ -1385,7 +1385,7 @@ final class OpenApiSpecService
      *
      * @return array{refs: list<string>, anchors: list<string>}
      */
-    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false, bool $inSchema = false, bool $securityIsRequirement = false): array
+    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false, bool $inSchema = false, bool $inOperation = false): array
     {
         $refs = [];
         $anchors = [];
@@ -1439,7 +1439,7 @@ final class OpenApiSpecService
             $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $securityIsRequirement) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1494,12 +1494,12 @@ final class OpenApiSpecService
                     // `security` keyword: an OpenAPI Security Requirement array
                     // referencing schemes by name (leaf data — no nested refs). It
                     // is a requirement ONLY as a direct child of an Operation Object
-                    // ($securityIsRequirement; root security is seeded separately).
-                    // A `security` member anywhere else (a response/header/parameter/
-                    // link, or inside a schema) is non-standard data and must NOT
-                    // mark (leak) a securityScheme — so we skip it as opaque data.
+                    // ($inOperation; root security is seeded separately). A `security`
+                    // member anywhere else (a response/header/parameter/link, or
+                    // inside a schema) is non-standard data and must NOT mark (leak)
+                    // a securityScheme — so we skip it as opaque data.
                     if ($key === 'security') {
-                        if ($securityIsRequirement) {
+                        if ($inOperation) {
                             foreach ($this->securityRequirementSchemes($child) as $name) {
                                 $refs[] = 'securitySchemes/'.$name;
                             }
@@ -1530,25 +1530,32 @@ final class OpenApiSpecService
                     // path items). Both the callback-name and expression levels are
                     // arbitrary names, so walk the path items directly (in keyword
                     // position) rather than misreading an expression as a keyword.
+                    // `callbacks` is an Operation Object keyword. Treat it as a
+                    // callback map ONLY in operation context ($inOperation); a
+                    // `callbacks` member elsewhere (response/header/parameter/schema)
+                    // is non-standard data and must NOT mark components.callbacks
+                    // reachable — skip it as opaque data.
                     if ($key === 'callbacks' && is_array($child)) {
-                        foreach ($child as $callback) {
-                            if (! is_array($callback)) {
-                                continue;
-                            }
-                            // A Callback may carry a `$ref` alias AND sibling
-                            // runtime-expression path items at once — collect the
-                            // alias AND walk every sibling (a surviving sibling
-                            // operation's schema refs must stay reachable).
-                            foreach ($callback as $cbKey => $cbValue) {
-                                if ($cbKey === '$ref') {
-                                    $addComponent($cbValue, 'callbacks'); // callback ref → callbacks only
-
+                        if ($inOperation) {
+                            foreach ($child as $callback) {
+                                if (! is_array($callback)) {
                                     continue;
                                 }
-                                // A callback path item — a path-item position (not a
-                                // schema), so its top-level $ref may reuse a pathItems
-                                // component; verb children are operations.
-                                $walk($cbValue, false, true, false, false);
+                                // A Callback may carry a `$ref` alias AND sibling
+                                // runtime-expression path items at once — collect the
+                                // alias AND walk every sibling (a surviving sibling
+                                // operation's schema refs must stay reachable).
+                                foreach ($callback as $cbKey => $cbValue) {
+                                    if ($cbKey === '$ref') {
+                                        $addComponent($cbValue, 'callbacks'); // callback ref → callbacks only
+
+                                        continue;
+                                    }
+                                    // A callback path item — a path-item position (not
+                                    // a schema), so its top-level $ref may reuse a
+                                    // pathItems component; verb children are operations.
+                                    $walk($cbValue, false, true, false, false);
+                                }
                             }
                         }
 
@@ -1623,15 +1630,15 @@ final class OpenApiSpecService
                 // A child keyed by an HTTP verb is an Operation Object ONLY when its
                 // parent is a Path Item ($pathItemContext) — otherwise a nested
                 // object literally named `get`/`post` (in a response/header/schema)
-                // would be mistaken for an operation and its `security` annotation
-                // wrongly read as a requirement. Its DIRECT `security` is then a real
-                // requirement; the flag is single-level (sub-objects reset it).
-                $childSecurityIsRequirement = $pathItemContext && ! $keysAreNames && in_array($keyStr, self::HTTP_VERBS, true);
-                $walk($child, $childKeysAreNames, false, $childInSchema, $childSecurityIsRequirement); // sub-content is not a path-item position
+                // would be mistaken for an operation and its `security`/`callbacks`
+                // members wrongly interpreted. Its DIRECT `security`/`callbacks` are
+                // then real; the flag is single-level (sub-objects reset it).
+                $childInOperation = $pathItemContext && ! $keysAreNames && in_array($keyStr, self::HTTP_VERBS, true);
+                $walk($child, $childKeysAreNames, false, $childInSchema, $childInOperation); // sub-content is not a path-item position
             }
         };
 
-        $walk($node, $keysAreNames, $pathItemContext, $inSchema, $securityIsRequirement);
+        $walk($node, $keysAreNames, $pathItemContext, $inSchema, $inOperation);
 
         return ['refs' => $refs, 'anchors' => $anchors];
     }
@@ -1923,7 +1930,14 @@ final class OpenApiSpecService
         $rebuilt = [];
         foreach ($callback as $key => $value) {
             if ($key === '$ref') {
-                $rebuilt[$key] = $value; // alias to another callback component (filtered there)
+                // Preserve a callback alias ONLY when valid: external (other
+                // document) or a same-document components.callbacks ref. A
+                // same-document ref to any OTHER component is malformed — the
+                // reachability walk refuses to keep it from callback position, so
+                // emitting it would dangle; drop it.
+                if ($this->localCallbackRefIsValid($value)) {
+                    $rebuilt[$key] = $value;
+                }
 
                 continue;
             }
@@ -1933,7 +1947,25 @@ final class OpenApiSpecService
                 : $value;
         }
 
-        return $rebuilt;
+        // A Callback Object is a JSON map — emit `{}` (not `[]`) if it emptied out
+        // (e.g. its only content was a dropped malformed `$ref`).
+        return $rebuilt === [] ? (object) [] : $rebuilt;
+    }
+
+    /**
+     * Whether a Callback Object `$ref` is safe to preserve: a non-string is not,
+     * an external ref (no same-document fragment) is kept conservatively, and a
+     * same-document ref must target components.callbacks (anything else is
+     * malformed and would dangle after pruning).
+     */
+    private function localCallbackRefIsValid(mixed $ref): bool
+    {
+        if (! is_string($ref)) {
+            return false;
+        }
+        $fragment = $this->localFragment($ref);
+
+        return $fragment === null || str_starts_with($fragment, '/components/callbacks/');
     }
 
     /**

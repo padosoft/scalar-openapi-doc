@@ -2084,6 +2084,59 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_callbacks_in_a_response_does_not_keep_a_callback_component(): void
+    {
+        // `callbacks` is an Operation-level keyword. A non-standard `callbacks`
+        // member on a granted RESPONSE must not mark components.callbacks reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => [
+                    'description' => 'ok',
+                    'callbacks' => ['cb' => ['$ref' => '#/components/callbacks/Hidden']],
+                ]],
+            ]]],
+            'components' => [
+                'callbacks' => ['Hidden' => ['{$req}' => ['post' => [
+                    'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret']]]],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ]]]],
+                'schemas' => ['Secret' => ['type' => 'object']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('callbacks')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_malformed_callback_ref_to_non_callback_component_is_dropped(): void
+    {
+        // A Callback Object `$ref` pointing at a non-callback component (a pathItems)
+        // is malformed: reachability won't keep the target from callback position,
+        // so the ref must be dropped (not emitted, which would dangle).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['$ref' => '#/components/pathItems/Hidden']],
+            ]]],
+            'components' => ['pathItems' => ['Hidden' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['callbacks']['cb'])->toEqual((object) [])
+            ->and($filtered['components'] ?? [])->not->toHaveKey('pathItems');
+    }
+
     public function test_inline_callback_ref_sibling_operation_keeps_its_schema_reachable(): void
     {
         // An inline callback has a `$ref` alias PLUS a sibling expression whose
