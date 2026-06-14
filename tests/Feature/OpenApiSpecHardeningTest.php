@@ -759,6 +759,52 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_generic_ref_to_path_item_does_not_keep_it(): void
+    {
+        // A $ref to components.pathItems from a SCHEMA position (cross-type) must
+        // not keep the unfiltered path item (with its ungranted operations).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/pathItems/Admin'],
+                ]]]],
+            ]]],
+            'components' => ['pathItems' => ['Admin' => ['get' => [
+                'tags' => ['Admin'],
+                'responses' => ['200' => ['description' => 'secret']],
+            ]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['pathItems'] ?? [])->toBe([]);
+    }
+
+    public function test_same_name_sibling_in_other_directory_is_external(): void
+    {
+        // Upstream is .../specs/v1/openapi.json; a "../common/openapi.json" ref
+        // resolves to a DIFFERENT directory's file — external, not the current doc.
+        config(['openapi.upstream_url' => 'https://api.example.com/specs/v1/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '../common/openapi.json#/components/schemas/Internal'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Internal' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
     public function test_sibling_relative_ref_is_external(): void
     {
         // A relative ref to a SIBLING file ("./common.yaml#/...") targets another

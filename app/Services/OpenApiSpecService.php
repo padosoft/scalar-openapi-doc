@@ -615,8 +615,10 @@ final class OpenApiSpecService
 
     /**
      * Whether a ref's base (the part before '#') resolves to the configured
-     * upstream document. An absolute base must equal the upstream URL (sans
-     * query/fragment); a relative base must name the same document file.
+     * upstream document. The base is resolved as a URI-reference against the
+     * upstream URL and the NORMALIZED full document URIs are compared — so a
+     * same-name sibling in a different directory ("../common/openapi.json" vs an
+     * upstream ".../v1/openapi.json") is correctly treated as a different document.
      */
     private function refBaseIsCurrentDocument(string $base): bool
     {
@@ -625,18 +627,27 @@ final class OpenApiSpecService
             return false;
         }
 
-        $upstreamDoc = $this->documentName($upstream);
-        if ($upstreamDoc === '') {
-            return false;
-        }
+        $upstreamDoc = $this->stripQueryFragment($upstream);
+        $resolved = $this->resolveUriReference($base, $upstreamDoc);
 
-        if (str_starts_with($base, '//') || preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $base) === 1) {
-            // Absolute / protocol-relative base — same doc only if it IS the upstream.
-            return $this->stripQueryFragment($base) === $this->stripQueryFragment($upstream);
-        }
+        return $resolved !== null && $resolved === $upstreamDoc;
+    }
 
-        // Relative base — compare document file names.
-        return $this->documentName($base) === $upstreamDoc;
+    /**
+     * The owning "type/name" of a same-document component ref, or null if the ref
+     * is external or not a component pointer. No operation-bearing guard — callers
+     * in structural (path-item/callback) positions use this directly.
+     */
+    private function owningComponentRef(string $ref): ?string
+    {
+        $fragment = $this->localFragment($ref);
+        $localPrefix = '/components/';
+        if ($fragment === null || ! str_starts_with($fragment, $localPrefix)) {
+            return null;
+        }
+        $segments = explode('/', substr($fragment, strlen($localPrefix)));
+
+        return count($segments) >= 2 ? $segments[0].'/'.$segments[1] : null;
     }
 
     private function stripQueryFragment(string $url): string
@@ -644,12 +655,62 @@ final class OpenApiSpecService
         return explode('#', explode('?', $url)[0])[0];
     }
 
-    private function documentName(string $url): string
+    /**
+     * Minimal RFC-3986-style resolution of a URI-reference against a base URL,
+     * returning the normalised absolute target (or null if unresolvable).
+     */
+    private function resolveUriReference(string $ref, string $baseUrl): ?string
     {
-        $path = rtrim($this->stripQueryFragment($url), '/');
-        $pos = strrpos($path, '/');
+        $ref = $this->stripQueryFragment($ref);
+        if ($ref === '') {
+            return $baseUrl;
+        }
+        if (preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $ref) === 1) {
+            return $ref; // absolute URI
+        }
 
-        return $pos === false ? $path : substr($path, $pos + 1);
+        $baseParts = parse_url($baseUrl);
+        if (! is_array($baseParts) || ! isset($baseParts['scheme'], $baseParts['host'])) {
+            return null;
+        }
+        $scheme = (string) $baseParts['scheme'];
+        if (str_starts_with($ref, '//')) {
+            return $scheme.':'.$ref; // protocol-relative
+        }
+
+        $origin = $scheme.'://'.$baseParts['host'].(isset($baseParts['port']) ? ':'.$baseParts['port'] : '');
+        $basePath = is_string($baseParts['path'] ?? null) ? $baseParts['path'] : '/';
+
+        if (str_starts_with($ref, '/')) {
+            $path = $ref; // absolute path
+        } else {
+            $slash = strrpos($basePath, '/');
+            $dir = $slash === false ? '/' : substr($basePath, 0, $slash + 1);
+            $path = $dir.$ref;
+        }
+
+        return $origin.$this->normalizePath($path);
+    }
+
+    /**
+     * Normalises a URL path, resolving "." and ".." segments.
+     */
+    private function normalizePath(string $path): string
+    {
+        $out = [];
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '' || $segment === '.') {
+                continue;
+            }
+            if ($segment === '..') {
+                array_pop($out);
+
+                continue;
+            }
+            $out[] = $segment;
+        }
+
+        return '/'.implode('/', $out);
     }
 
     /**
@@ -1074,23 +1135,29 @@ final class OpenApiSpecService
                 continue;
             }
 
-            // Example and Link components: follow only a top-level $ref (their
-            // other fields are data — an Example's `value`, a Link's
-            // parameters/requestBody). A Callback component is a map of runtime
-            // expressions => path items, so walk each path item. Everything else
-            // is walked in full.
+            // A top-level $ref on any of these structural components is an alias to
+            // another component of the same (operation-bearing or not) type.
+            $aliasRef = is_array($component) && is_string($component['$ref'] ?? null) ? $component['$ref'] : null;
+
             if (in_array($type, ['examples', 'links'], true)) {
-                $children = $this->collectReachableRefs(['$ref' => (is_array($component) ? ($component['$ref'] ?? null) : null)]);
+                // Example/Link: follow only an alias $ref; other fields are data.
+                $owning = $aliasRef !== null ? $this->owningComponentRef($aliasRef) : null;
+                $children = $owning !== null ? [$owning] : [];
             } elseif ($type === 'callbacks') {
-                if (is_array($component) && isset($component['$ref'])) {
-                    // Callback component that is itself a Reference Object (alias).
-                    $children = $this->collectReachableRefs(['$ref' => $component['$ref']]);
+                if ($aliasRef !== null) {
+                    $owning = $this->owningComponentRef($aliasRef); // callback alias
+                    $children = $owning !== null ? [$owning] : [];
                 } else {
+                    // Callback Object: a map of runtime expressions => path items.
                     $children = [];
                     foreach ($this->asArray($component) as $pathItem) {
-                        $children = [...$children, ...$this->collectReachableRefs($pathItem)];
+                        $children = [...$children, ...$this->collectReachableRefs($pathItem, false, true)];
                     }
                 }
+            } elseif ($type === 'pathItems') {
+                // A reusable path item — a path-item position, so its top-level
+                // $ref (alias) may target another path item.
+                $children = $this->collectReachableRefs($component, false, true);
             } else {
                 $children = $this->collectReachableRefs($component);
             }
@@ -1141,7 +1208,7 @@ final class OpenApiSpecService
      *
      * @return array{refs: list<string>, anchors: list<string>}
      */
-    private function walkReachability(mixed $node, bool $keysAreNames = false): array
+    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false): array
     {
         $refs = [];
         $anchors = [];
@@ -1161,22 +1228,26 @@ final class OpenApiSpecService
         // to its owning "type/name". An external URI ref (with a scheme/authority,
         // e.g. "https://other#/components/schemas/X") is ignored — it targets
         // another document, so our local component must not be kept alive by it.
-        $addComponent = function (mixed $ref) use (&$refs): void {
+        $addComponent = function (mixed $ref, bool $allowOperationBearing = false) use (&$refs): void {
             if (! is_string($ref)) {
                 return;
             }
-            $fragment = $this->localFragment($ref);
-            $localPrefix = '/components/';
-            if ($fragment === null || ! str_starts_with($fragment, $localPrefix)) {
+            $owning = $this->owningComponentRef($ref);
+            if ($owning === null) {
                 return;
             }
-            $segments = explode('/', substr($fragment, strlen($localPrefix)));
-            if (count($segments) >= 2) {
-                $refs[] = $segments[0].'/'.$segments[1]; // owning "type/name"
+            // Operation-bearing components (pathItems/callbacks) are reachable ONLY
+            // from structural positions (paths inlined by resolvePathItem, or
+            // path-item/callback positions) — never via a generic $ref from a
+            // schema/parameter/response position, which would keep an unfiltered
+            // path item/callback (with ungranted operations) in the response.
+            if (! $allowOperationBearing && in_array(explode('/', $owning, 2)[0], ['pathItems', 'callbacks'], true)) {
+                return;
             }
+            $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1205,7 +1276,9 @@ final class OpenApiSpecService
                             // Anchor fragment ("#name") — resolved via anchor decls.
                             $refs[] = self::ANCHOR_REF_PREFIX.substr($child, 1);
                         } else {
-                            $addComponent($child);
+                            // $pathItemContext: a path-item top-level $ref may target
+                            // an operation-bearing component (pathItems/callbacks).
+                            $addComponent($child, $pathItemContext);
                         }
 
                         continue;
@@ -1245,12 +1318,15 @@ final class OpenApiSpecService
                                 continue;
                             }
                             if (isset($callback['$ref'])) {
-                                $addComponent($callback['$ref']);
+                                $addComponent($callback['$ref'], true); // callback position
 
                                 continue;
                             }
                             foreach ($callback as $pathItem) {
-                                $walk($pathItem, false);
+                                // Each value is a callback path item — a path-item
+                                // position, so its top-level $ref may reuse a
+                                // pathItems/callbacks component.
+                                $walk($pathItem, false, true);
                             }
                         }
 
@@ -1304,11 +1380,11 @@ final class OpenApiSpecService
                 // Entering a name-map: its children's keys are names, so keyword
                 // handling must NOT apply at that level.
                 $childKeysAreNames = ! $keysAreNames && in_array((string) $key, $nameMaps, true);
-                $walk($child, $childKeysAreNames);
+                $walk($child, $childKeysAreNames, false); // sub-content is not a path-item position
             }
         };
 
-        $walk($node, $keysAreNames);
+        $walk($node, $keysAreNames, $pathItemContext);
 
         return ['refs' => $refs, 'anchors' => $anchors];
     }
@@ -1318,9 +1394,9 @@ final class OpenApiSpecService
      *
      * @return list<string>
      */
-    private function collectReachableRefs(mixed $node, bool $keysAreNames = false): array
+    private function collectReachableRefs(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false): array
     {
-        return $this->walkReachability($node, $keysAreNames)['refs'];
+        return $this->walkReachability($node, $keysAreNames, $pathItemContext)['refs'];
     }
 
     /**
