@@ -292,7 +292,201 @@ final class OpenApiSpecService
         // surviving operation inherits it) using the reachability it computes.
         $spec = $this->pruneComponents($spec);
 
+        // Drop Link Objects whose target operation was filtered out, so a granted
+        // operation can't leak a hidden endpoint's operationId/path via a link.
+        $spec = $this->pruneDanglingLinks($spec);
+
         return $spec;
+    }
+
+    /**
+     * Removes response/component Link Objects whose `operationId`/`operationRef`
+     * targets an operation that did not survive filtering (and Link `$ref`s to a
+     * components.link that was itself dropped). Otherwise a user granted only the
+     * source operation would receive a reference to — and the path/id of — an
+     * endpoint they cannot see.
+     *
+     * @param  array<string, mixed>  $spec
+     * @return array<string, mixed>
+     */
+    private function pruneDanglingLinks(array $spec): array
+    {
+        // Surviving operation identity (from the already-filtered paths/webhooks):
+        // operationId names, and "method path" locations for operationRef.
+        $ids = [];
+        $locations = [];
+        foreach (['paths', 'webhooks'] as $container) {
+            foreach ($this->asArray($spec[$container] ?? null) as $key => $pathItem) {
+                foreach ($this->operations($pathItem) as $method => $operation) {
+                    $operationId = $operation['operationId'] ?? null;
+                    if (is_string($operationId)) {
+                        $ids[$operationId] = true;
+                    }
+                    if ($container === 'paths') {
+                        $locations[strtolower($method).' '.(string) $key] = true;
+                    }
+                }
+            }
+        }
+
+        // Which components.links survive (by their own target). A link that is a
+        // $ref to another components.link is conservatively kept (chains are rare).
+        $survivingLinkNames = [];
+        $components = $this->asArray($spec['components'] ?? null);
+        foreach ($this->asArray($components['links'] ?? null) as $name => $link) {
+            if ($this->linkTargetSurvives($link, $ids, $locations, [])) {
+                $survivingLinkNames[(string) $name] = true;
+            }
+        }
+
+        $spec = $this->filterLinksIn($spec, ['paths', 'webhooks'], $ids, $locations, $survivingLinkNames);
+
+        if (is_array($spec['components'] ?? null)) {
+            $components = $spec['components'];
+            if (is_array($components['links'] ?? null)) {
+                $kept = [];
+                foreach ($components['links'] as $name => $link) {
+                    if (isset($survivingLinkNames[(string) $name])) {
+                        $kept[$name] = $link;
+                    }
+                }
+                $components['links'] = $kept;
+            }
+            if (is_array($components['responses'] ?? null)) {
+                $components['responses'] = $this->filterLinksInResponses($components['responses'], $ids, $locations, $survivingLinkNames);
+            }
+            $spec['components'] = $components;
+        }
+
+        return $spec;
+    }
+
+    /**
+     * Applies Link filtering to operations' responses under the given containers.
+     *
+     * @param  array<string, mixed>  $spec
+     * @param  list<string>  $containers
+     * @param  array<string, true>  $ids
+     * @param  array<string, true>  $locations
+     * @param  array<string, true>  $survivingLinkNames
+     * @return array<string, mixed>
+     */
+    private function filterLinksIn(array $spec, array $containers, array $ids, array $locations, array $survivingLinkNames): array
+    {
+        foreach ($containers as $container) {
+            $items = $this->asArray($spec[$container] ?? null);
+            if ($items === []) {
+                continue;
+            }
+            $rebuilt = [];
+            foreach ($items as $key => $pathItem) {
+                if (is_array($pathItem)) {
+                    foreach ($this->operations($pathItem) as $method => $operation) {
+                        if (is_array($operation['responses'] ?? null)) {
+                            $operation['responses'] = $this->filterLinksInResponses($operation['responses'], $ids, $locations, $survivingLinkNames);
+                            $pathItem[$method] = $operation;
+                        }
+                    }
+                }
+                $rebuilt[$key] = $pathItem;
+            }
+            $spec[$container] = $rebuilt;
+        }
+
+        return $spec;
+    }
+
+    /**
+     * Drops dangling Link Objects from a Responses map.
+     *
+     * @param  array<array-key, mixed>  $responses
+     * @param  array<string, true>  $ids
+     * @param  array<string, true>  $locations
+     * @param  array<string, true>  $survivingLinkNames
+     * @return array<array-key, mixed>
+     */
+    private function filterLinksInResponses(array $responses, array $ids, array $locations, array $survivingLinkNames): array
+    {
+        $result = [];
+        foreach ($responses as $code => $response) {
+            if (is_array($response) && is_array($response['links'] ?? null)) {
+                $links = [];
+                foreach ($response['links'] as $name => $link) {
+                    if ($this->linkTargetSurvives($link, $ids, $locations, $survivingLinkNames)) {
+                        $links[$name] = $link;
+                    }
+                }
+                $response['links'] = $links;
+            }
+            $result[$code] = $response;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Whether a Link Object's target survives: a $ref to a surviving
+     * components.link, an operationId in the surviving set, or an operationRef
+     * resolving to a surviving path operation. A link with no resolvable local
+     * target (external operationRef, or none) is kept.
+     *
+     * @param  array<string, true>  $ids
+     * @param  array<string, true>  $locations
+     * @param  array<string, true>  $survivingLinkNames
+     */
+    private function linkTargetSurvives(mixed $link, array $ids, array $locations, array $survivingLinkNames): bool
+    {
+        if (! is_array($link)) {
+            return true;
+        }
+
+        $ref = $link['$ref'] ?? null;
+        if (is_string($ref)) {
+            $prefix = '#/components/links/';
+            if (str_starts_with($ref, $prefix)) {
+                return isset($survivingLinkNames[substr($ref, strlen($prefix))]);
+            }
+
+            return true; // external/unknown link ref — leave as-is
+        }
+
+        $operationId = $link['operationId'] ?? null;
+        if (is_string($operationId)) {
+            return isset($ids[$operationId]);
+        }
+
+        $operationRef = $link['operationRef'] ?? null;
+        if (is_string($operationRef)) {
+            return $this->operationRefSurvives($operationRef, $locations);
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether an `operationRef` ("#/paths/<escaped-path>/<method>") targets a
+     * surviving path operation. Non-local refs (external, or not under #/paths/)
+     * are left untouched.
+     *
+     * @param  array<string, true>  $locations
+     */
+    private function operationRefSurvives(string $operationRef, array $locations): bool
+    {
+        $prefix = '#/paths/';
+        if (! str_starts_with($operationRef, $prefix)) {
+            return true;
+        }
+
+        $rest = substr($operationRef, strlen($prefix));
+        $pos = strrpos($rest, '/');
+        if ($pos === false) {
+            return true;
+        }
+
+        $path = str_replace(['~1', '~0'], ['/', '~'], substr($rest, 0, $pos));
+        $method = strtolower(substr($rest, $pos + 1));
+
+        return isset($locations[$method.' '.$path]);
     }
 
     /**
@@ -753,9 +947,9 @@ final class OpenApiSpecService
         $names = [];
         foreach ($this->asArray($security) as $requirement) {
             foreach ($this->asArray($requirement) as $schemeName => $scopes) {
-                if (is_string($schemeName)) {
-                    $names[] = $schemeName;
-                }
+                // A digit-only scheme name decodes to an int array key, so cast
+                // rather than is_string-guard (else its scheme dangles on prune).
+                $names[] = (string) $schemeName;
             }
         }
 

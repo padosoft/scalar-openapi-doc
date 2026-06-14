@@ -583,6 +583,60 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components']['schemas'] ?? [])->toBe([]);
     }
 
+    public function test_keeps_digit_only_security_scheme_name(): void
+    {
+        // A digit-only scheme name decodes to an int JSON key; it must still be
+        // collected so its securityScheme isn't pruned (dangling auth otherwise).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'security' => [['123' => []]],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]],
+            'components' => ['securitySchemes' => ['123' => ['type' => 'http', 'scheme' => 'bearer']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->toHaveKey('security')
+            ->and($filtered['components']['securitySchemes'])->toHaveKey('123')
+            ->and($filtered['components']['securitySchemes'])->toHaveCount(1);
+    }
+
+    public function test_prunes_links_to_filtered_out_operations(): void
+    {
+        // /a (granted) has a response link to /secret (not granted). After
+        // filtering, the link must be removed so /secret isn't leaked via the link.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toSecret' => ['operationRef' => '#/paths/~1secret/get'],
+                        'toSelf' => ['operationId' => 'getA'],
+                    ]]],
+                ]],
+                '/secret' => ['get' => [
+                    'tags' => ['Admin'],
+                    'operationId' => 'getSecret',
+                    'responses' => ['200' => ['description' => 'ok']],
+                ]],
+            ],
+        ];
+        // /a.get also needs operationId getA to keep the self link.
+        $spec['paths']['/a']['get']['operationId'] = 'getA';
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/a'])
+            ->and($filtered['paths']['/a']['get']['responses']['200']['links'])
+            ->toHaveKey('toSelf')->not->toHaveKey('toSecret');
+    }
+
     public function test_keeps_discriminator_mapping_target_schemas(): void
     {
         // discriminator.mapping values are schema refs (by URI or bare name) not
