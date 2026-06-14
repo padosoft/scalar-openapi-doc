@@ -44,6 +44,14 @@ final class OpenApiSpecService
      */
     private const WEBHOOK_GRANT_PREFIX = 'webhook:';
 
+    /**
+     * Internal reachability marker for a JSON Schema anchor fragment ref
+     * ("#name"): resolved against $anchor/$dynamicAnchor/$recursiveAnchor
+     * declarations. The NUL bytes keep it from ever colliding with a real
+     * "type/name" component key.
+     */
+    private const ANCHOR_REF_PREFIX = "\0anchorRef\0";
+
     // ---------------------------------------------------------------------
     // Upstream fetch + cache
     // ---------------------------------------------------------------------
@@ -871,6 +879,21 @@ final class OpenApiSpecService
         // the subtree). Root `security` schemes are intentionally NOT seeded yet:
         // whether root security survives depends on the reachable set computed
         // below, so seeding it up front could keep schemes no visible op uses.
+        // Map JSON Schema anchor names ($anchor/$dynamicAnchor/$recursiveAnchor)
+        // to the components that declare them, so an anchor fragment ref ("#name")
+        // keeps the anchored component reachable instead of dangling.
+        $anchorOwners = [];
+        foreach ($components as $type => $entries) {
+            if (! is_array($entries)) {
+                continue;
+            }
+            foreach ($entries as $name => $entry) {
+                foreach ($this->collectAnchorNames($entry) as $anchor) {
+                    $anchorOwners[$anchor][] = ((string) $type).'/'.((string) $name);
+                }
+            }
+        }
+
         $reachable = [];                                   // "schemas/Foo" => true
         $this->drainReachability([
             // paths/webhooks are NAME maps (keys are path/webhook names, not
@@ -878,7 +901,7 @@ final class OpenApiSpecService
             // named e.g. "security"/"example" would be misread as a keyword.
             ...$this->collectReachableRefs($spec['paths'] ?? [], true),
             ...$this->collectReachableRefs($spec['webhooks'] ?? [], true),
-        ], $reachable, $components);
+        ], $reachable, $components, $anchorOwners);
 
         // Decide root `security` now that the reachable set is known: keep it only
         // if a surviving operation inherits it (inline in paths/webhooks, or in a
@@ -891,7 +914,7 @@ final class OpenApiSpecService
                 foreach ($this->securityRequirementSchemes($spec['security']) as $schemeName) {
                     $rootQueue[] = 'securitySchemes/'.$schemeName;
                 }
-                $this->drainReachability($rootQueue, $reachable, $components);
+                $this->drainReachability($rootQueue, $reachable, $components, $anchorOwners);
             } else {
                 unset($spec['security']);
             }
@@ -931,13 +954,15 @@ final class OpenApiSpecService
      *
      * An Example component is special-cased: its `value` payload is data (never
      * traversed), but if the component is itself a Reference Object its `$ref` is
-     * still followed (so an example alias keeps its target alive).
+     * still followed (so an example alias keeps its target alive). An anchor
+     * fragment ref marker resolves to every component declaring that anchor.
      *
      * @param  list<string>  $queue
      * @param  array<string, true>  $reachable  (by-ref accumulator)
      * @param  array<array-key, mixed>  $components
+     * @param  array<string, list<string>>  $anchorOwners  anchor name => owning "type/name"s
      */
-    private function drainReachability(array $queue, array &$reachable, array $components): void
+    private function drainReachability(array $queue, array &$reachable, array $components, array $anchorOwners = []): void
     {
         while ($queue !== []) {
             $ref = array_pop($queue);
@@ -945,6 +970,18 @@ final class OpenApiSpecService
                 continue;
             }
             $reachable[$ref] = true;
+
+            // Anchor fragment ref ("#name"): enqueue every component declaring it.
+            if (str_starts_with($ref, self::ANCHOR_REF_PREFIX)) {
+                $anchor = substr($ref, strlen(self::ANCHOR_REF_PREFIX));
+                foreach ($anchorOwners[$anchor] ?? [] as $owner) {
+                    if (! isset($reachable[$owner])) {
+                        $queue[] = $owner;
+                    }
+                }
+
+                continue;
+            }
 
             [$type, $name] = array_pad(explode('/', $ref, 2), 2, null);
             if (! is_string($type) || ! is_string($name)) {
@@ -968,6 +1005,37 @@ final class OpenApiSpecService
                 }
             }
         }
+    }
+
+    /**
+     * Collects the JSON Schema anchor names ($anchor / $dynamicAnchor /
+     * $recursiveAnchor) declared anywhere within a node.
+     *
+     * @return list<string>
+     */
+    private function collectAnchorNames(mixed $node): array
+    {
+        $names = [];
+
+        $walk = static function (mixed $value) use (&$walk, &$names): void {
+            if (! is_array($value)) {
+                return;
+            }
+            foreach ($value as $key => $child) {
+                if (($key === '$anchor' || $key === '$dynamicAnchor' || $key === '$recursiveAnchor')
+                    && is_string($child) && $child !== ''
+                ) {
+                    $names[] = $child;
+
+                    continue;
+                }
+                $walk($child);
+            }
+        };
+
+        $walk($node);
+
+        return $names;
     }
 
     /**
@@ -1024,7 +1092,12 @@ final class OpenApiSpecService
                 if (! $keysAreNames) {
                     // $ref plus JSON Schema 2020-12 / draft-2019 dynamic refs.
                     if ($key === '$ref' || $key === '$dynamicRef' || $key === '$recursiveRef') {
-                        $addComponent($child);
+                        if (is_string($child) && str_starts_with($child, '#') && ! str_contains($child, '/') && $child !== '#') {
+                            // Anchor fragment ("#name") — resolved via anchor decls.
+                            $refs[] = self::ANCHOR_REF_PREFIX.substr($child, 1);
+                        } else {
+                            $addComponent($child);
+                        }
 
                         continue;
                     }

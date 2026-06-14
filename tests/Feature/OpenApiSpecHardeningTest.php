@@ -482,6 +482,30 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Node']);
     }
 
+    public function test_keeps_dynamic_anchor_target_schema(): void
+    {
+        // $dynamicRef: "#node" (anchor form) must keep the component declaring
+        // $dynamicAnchor: "node" reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$dynamicRef' => '#node'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Node' => ['$dynamicAnchor' => 'node', 'type' => 'object'],
+                'Unused' => ['type' => 'string'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toContain('Node')->not->toContain('Unused');
+    }
+
     public function test_keeps_owning_component_for_a_nested_pointer_ref(): void
     {
         // A $ref into a sub-schema (#/components/schemas/Pet/properties/id) must
