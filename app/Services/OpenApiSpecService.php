@@ -333,6 +333,12 @@ final class OpenApiSpecService
             $valid[] = $entry;
         }
 
+        // Nested `servers` (path-item / operation / callback level) override the
+        // top-level set per the OpenAPI spec, so they must be stripped too —
+        // otherwise surviving operations could still expose upstream/internal
+        // URLs even after we replace or clear the top-level list.
+        $spec = $this->stripNestedServers($spec);
+
         // Always override: if the admin activated no (valid) servers, REMOVE the
         // upstream `servers` so Scalar never shows the upstream URLs — only the
         // admin-approved set, which here is empty.
@@ -343,6 +349,101 @@ final class OpenApiSpecService
         }
 
         return $spec;
+    }
+
+    /**
+     * Removes `servers` from every path item and operation (and their nested
+     * callback path items) in paths/webhooks/components, so only the top-level
+     * admin-approved server list survives. Walks STRUCTURALLY (path-item →
+     * operation → callbacks → path-item) so a schema property literally named
+     * "servers" is never touched.
+     *
+     * @param  array<string, mixed>  $spec
+     * @return array<string, mixed>
+     */
+    private function stripNestedServers(array $spec): array
+    {
+        foreach (['paths', 'webhooks'] as $container) {
+            $items = $this->asArray($spec[$container] ?? null);
+            if ($items === []) {
+                continue;
+            }
+            $stripped = [];
+            foreach ($items as $key => $pathItem) {
+                $stripped[$key] = $this->stripPathItemServers($pathItem);
+            }
+            $spec[$container] = $stripped;
+        }
+
+        $components = $spec['components'] ?? null;
+        if (! is_array($components)) {
+            return $spec;
+        }
+
+        if (is_array($components['pathItems'] ?? null)) {
+            $pathItems = [];
+            foreach ($components['pathItems'] as $key => $pathItem) {
+                $pathItems[$key] = $this->stripPathItemServers($pathItem);
+            }
+            $components['pathItems'] = $pathItems;
+        }
+
+        if (is_array($components['callbacks'] ?? null)) {
+            $callbacks = [];
+            foreach ($components['callbacks'] as $name => $callback) {
+                $callbacks[$name] = $this->stripCallbackServers($callback);
+            }
+            $components['callbacks'] = $callbacks;
+        }
+
+        $spec['components'] = $components;
+
+        return $spec;
+    }
+
+    /**
+     * Strips `servers` from a path-item object and each of its operations
+     * (recursing through operation callbacks). Non-arrays pass through unchanged.
+     */
+    private function stripPathItemServers(mixed $pathItem): mixed
+    {
+        if (! is_array($pathItem)) {
+            return $pathItem;
+        }
+
+        unset($pathItem['servers']);
+
+        foreach (self::HTTP_VERBS as $verb) {
+            if (! is_array($pathItem[$verb] ?? null)) {
+                continue;
+            }
+            $operation = $pathItem[$verb];
+            unset($operation['servers']);
+            if (isset($operation['callbacks']) && is_array($operation['callbacks'])) {
+                foreach ($operation['callbacks'] as $name => $callback) {
+                    $operation['callbacks'][$name] = $this->stripCallbackServers($callback);
+                }
+            }
+            $pathItem[$verb] = $operation;
+        }
+
+        return $pathItem;
+    }
+
+    /**
+     * Strips nested `servers` from a Callback object (expression → path item).
+     */
+    private function stripCallbackServers(mixed $callback): mixed
+    {
+        if (! is_array($callback)) {
+            return $callback;
+        }
+
+        foreach ($callback as $expression => $pathItem) {
+            $callback[$expression] = $this->stripPathItemServers($pathItem);
+        }
+
+        return $callback;
     }
 
     // ---------------------------------------------------------------------
@@ -795,14 +896,20 @@ final class OpenApiSpecService
 
     /**
      * A playground server URL must be a syntactically valid ABSOLUTE http(s)
-     * URL. This rejects empty/whitespace, schemeless ("not-a-url") and unsafe
-     * schemes ("javascript:…") before they reach the spec the browser renders.
+     * URL. This rejects empty/whitespace, schemeless ("not-a-url"), unsafe
+     * schemes ("javascript:…") and CREDENTIAL-bearing URLs
+     * ("https://user:pass@host", which would ship credentials to every user's
+     * browser) before they reach the spec the browser renders.
      */
     private function isValidServerUrl(string $url): bool
     {
         $parts = parse_url(trim($url));
         if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
             return false;
+        }
+
+        if (isset($parts['user']) || isset($parts['pass'])) {
+            return false; // never expose embedded credentials client-side
         }
 
         return in_array(strtolower((string) $parts['scheme']), ['http', 'https'], true);

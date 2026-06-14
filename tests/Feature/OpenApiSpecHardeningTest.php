@@ -542,6 +542,40 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($allInvalid)->not->toHaveKey('servers');
     }
 
+    public function test_inject_servers_strips_nested_servers(): void
+    {
+        // Path-item and operation level `servers` override the top level, so they
+        // must be stripped too — only the admin-approved top-level set survives.
+        $spec = [
+            'openapi' => '3.1.0',
+            'paths' => ['/x' => [
+                'servers' => [['url' => 'https://internal.upstream/path-level']],
+                'get' => [
+                    'servers' => [['url' => 'https://internal.upstream/op-level']],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ]],
+        ];
+
+        $out = $this->service()->injectServers($spec, [['url' => 'https://api.example.com']]);
+
+        expect($out['servers'])->toBe([['url' => 'https://api.example.com']])
+            ->and($out['paths']['/x'])->not->toHaveKey('servers')
+            ->and($out['paths']['/x']['get'])->not->toHaveKey('servers');
+    }
+
+    public function test_inject_servers_rejects_credential_bearing_url(): void
+    {
+        // A server URL with embedded userinfo would ship credentials to the
+        // browser; it must be skipped like any other invalid entry.
+        $out = $this->service()->injectServers(['openapi' => '3.1.0'], [
+            ['url' => 'https://user:pass@api.example.com'],
+            ['url' => 'https://clean.example.com'],
+        ]);
+
+        expect($out['servers'])->toBe([['url' => 'https://clean.example.com']]);
+    }
+
     public function test_inject_servers_rejects_non_url_and_unsafe_scheme_values(): void
     {
         // Non-empty but invalid URLs (schemeless, javascript:, ftp:) must be
