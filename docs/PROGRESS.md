@@ -149,7 +149,8 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - **`2ee7e8f`→`fa311b5` (2 P2):** (azQi) in-schema opaque-data skip now covers ALL OpenAPI-only keyed maps (responses/headers/content/encoding/variables/scopes, not just links/callbacks) — a schema-level `responses` annotation no longer leaks components. (azQl) `extractTags` now collects callback/reusable-component operation tags (recursively) so a callback-only tag is grantable. Pest 184/184, PHPStan max 0, Pint clean.
 - **`fa311b5`→`7ac7f92` (1 P2):** in-schema skip list extended with `parameters`/`requestBody` (ref-bearing OpenAPI keys) — a schema annotation can't pull components.parameters/requestBodies + schemas. Pest 185/185, PHPStan max 0, Pint clean.
 - **`7ac7f92`→`f6d2341` (1 P2):** added `schema` to the in-schema opaque-key set (a `schema` annotation inside a Schema Object is non-standard, not a JSON-Schema keyword). The OpenAPI-only key set is now comprehensive for ref-bearing keys: links, callbacks, security, responses, headers, content, encoding, variables, scopes, parameters, requestBody, schema. Pest 186/186, PHPStan max 0, Pint clean.
-- **Awaiting:** Codex review of `f6d2341`.
+- **`f6d2341`→`d3cdc6a` (3 P2):** (BqS) **switched the in-schema deny-list to an ALLOW-LIST** — inside a schema only JSON-Schema keywords (refs/anchors/discriminator + subschema keywords) are walked; all else (xml/externalDocs/vendor/scalars/OpenAPI annotations) is opaque. Exhaustive by design, ends the per-key enumeration. (BqT) anchors gated on `$inSchema` (declarations + bare-`#name` ref classification). (BqU) userinfo included in normalized URI compare. Pest 189/189, PHPStan max 0, Pint clean.
+- **Awaiting:** Codex review of `d3cdc6a`.
 
 ## T5 — task/scalar-proxy
 _Not started._
