@@ -128,9 +128,13 @@ final class OpenApiSpecService
             /** @var array<string, mixed> $spec */
             return $spec;
         } catch (Throwable $e) {
+            // Redact: the upstream URL may carry userinfo/signed query params, and
+            // the HTTP client's exception message embeds the full request URI —
+            // never write those secrets to the logs.
             Log::error('OpenAPI upstream spec fetch failed', [
-                'url' => $url,
-                'exception' => $e->getMessage(),
+                'url' => $this->redactUrl($url),
+                'exception' => $e::class,
+                'message' => $this->redactMessage($e->getMessage()),
             ]);
 
             // Stale-on-error: serve the last known-good copy if we have one.
@@ -640,7 +644,8 @@ final class OpenApiSpecService
     {
         $parts = parse_url($url);
         if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
-            throw new InvalidOpenApiSpecException("OpenAPI upstream URL is invalid: [{$url}].");
+            // Don't echo the raw URL — it may carry userinfo/signed query secrets.
+            throw new InvalidOpenApiSpecException('OpenAPI upstream URL is invalid (missing scheme or host).');
         }
 
         $scheme = strtolower((string) $parts['scheme']);
@@ -666,6 +671,37 @@ final class OpenApiSpecService
         if ($hosts === [] || ! in_array($host, array_map('strtolower', $hosts), true)) {
             throw new InvalidOpenApiSpecException("OpenAPI upstream host [{$host}] is not allowed.");
         }
+    }
+
+    /**
+     * Safe-for-logs form of a URL: scheme://host[:port][path] only — drops
+     * userinfo, query and fragment (which can carry credentials / signed tokens).
+     */
+    private function redactUrl(string $url): string
+    {
+        $parts = parse_url($url);
+        if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
+            return '[invalid-url]';
+        }
+
+        $port = isset($parts['port']) ? ':'.$parts['port'] : '';
+        $path = is_string($parts['path'] ?? null) ? $parts['path'] : '';
+
+        return strtolower((string) $parts['scheme']).'://'.$parts['host'].$port.$path;
+    }
+
+    /**
+     * Strips userinfo and query/fragment from any http(s) URL embedded in a
+     * string (e.g. an HTTP client's exception message), so secrets in the
+     * upstream URI never reach the logs.
+     */
+    private function redactMessage(string $message): string
+    {
+        return (string) preg_replace(
+            '~(https?://)(?:[^@/\s]*@)?([^/\s?#]+)([^\s?#]*)[^\s]*~i',
+            '$1$2$3',
+            $message
+        );
     }
 
     /**

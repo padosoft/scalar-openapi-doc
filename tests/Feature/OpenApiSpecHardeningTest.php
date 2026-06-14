@@ -8,6 +8,7 @@ use App\Exceptions\InvalidOpenApiSpecException;
 use App\Services\OpenApiSpecService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 /**
@@ -86,6 +87,34 @@ class OpenApiSpecHardeningTest extends TestCase
         $this->service()->fetchRaw();
 
         expect(Cache::has((string) config('openapi.cache_key')))->toBeTrue();
+    }
+
+    public function test_redacts_upstream_url_secrets_when_logging_failures(): void
+    {
+        // Userinfo + signed query in the upstream URL must never reach the logs.
+        config([
+            'openapi.upstream_url' => 'https://user:secret@specs.example.com/openapi.json?token=abc123',
+            'openapi.allowed_hosts' => ['specs.example.com'],
+        ]);
+        Cache::flush();
+        Http::fake(['*' => Http::response('error', 500)]);
+        Log::spy();
+
+        try {
+            $this->service()->fetchRaw();
+        } catch (\Throwable) {
+            // no stale copy -> rethrows; not under test here
+        }
+
+        Log::shouldHaveReceived('error')->withArgs(function (string $message, array $context): bool {
+            $blob = $message.' '.(string) json_encode($context);
+
+            return ! str_contains($blob, 'secret')
+                && ! str_contains($blob, 'abc123')
+                && ! str_contains($blob, 'user:secret')
+                && is_string($context['url'] ?? null)
+                && str_contains($context['url'], 'specs.example.com');
+        })->once();
     }
 
     // ---- B3: anti cache-poisoning -----------------------------------------
