@@ -537,6 +537,27 @@ class OpenApiSpecHardeningTest extends TestCase
             ->toContain('Wrapper')->toContain('Inner')->toContain('Inner2');
     }
 
+    public function test_security_in_example_data_does_not_keep_scheme_alive(): void
+    {
+        // A `security` key inside an `example` value is data, not a real Security
+        // Requirement — it must not keep an unreferenced scheme alive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'example' => ['security' => [['InternalAuth' => []]]],
+                ]]]],
+            ]]],
+            'components' => ['securitySchemes' => ['InternalAuth' => ['type' => 'http', 'scheme' => 'bearer']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
     public function test_reachable_example_value_refs_do_not_keep_components_alive(): void
     {
         // A reachable components.examples entry's `value` is data: a literal $ref

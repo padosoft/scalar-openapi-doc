@@ -532,16 +532,14 @@ final class OpenApiSpecService
         }
 
         // Seed reachability from $refs and operation-level security under paths
-        // AND webhooks (path-item-level $refs covered — collectComponentRefs walks
+        // AND webhooks (path-item-level $refs covered — collectReachableRefs walks
         // the subtree). Root `security` schemes are intentionally NOT seeded yet:
         // whether root security survives depends on the reachable set computed
         // below, so seeding it up front could keep schemes no visible op uses.
         $reachable = [];                                   // "schemas/Foo" => true
         $queue = [
-            ...$this->collectComponentRefs($spec['paths'] ?? []),
-            ...$this->collectComponentRefs($spec['webhooks'] ?? []),
-            ...$this->collectSecuritySchemeRefs($spec['paths'] ?? []),
-            ...$this->collectSecuritySchemeRefs($spec['webhooks'] ?? []),
+            ...$this->collectReachableRefs($spec['paths'] ?? []),
+            ...$this->collectReachableRefs($spec['webhooks'] ?? []),
         ];
 
         while ($queue !== []) {
@@ -570,7 +568,7 @@ final class OpenApiSpecService
             // Follow both $ref children AND security-scheme names declared inside
             // this reachable component (e.g. a callback/pathItem operation's
             // `security`), so callback-only schemes are kept, not pruned.
-            foreach ([...$this->collectComponentRefs($component), ...$this->collectSecuritySchemeRefs($component)] as $child) {
+            foreach ($this->collectReachableRefs($component) as $child) {
                 if (! isset($reachable[$child])) {
                     $queue[] = $child;
                 }
@@ -620,33 +618,33 @@ final class OpenApiSpecService
     }
 
     /**
-     * Collects the OWNING component references ("schemas/Foo") present in a node.
+     * Collects all component reachability keys ("type/name") present in a node —
+     * both `$ref` component references and `security`-named securitySchemes —
+     * in one context-aware walk so the same guards apply to both.
      *
-     * A $ref may be a JSON Pointer into a component (e.g.
-     * "#/components/schemas/Pet/properties/id" or ".../Pet/$defs/Id"); only the
-     * first segment after the bucket is the component key, so we normalise to
-     * "schemas/Pet" — otherwise the owning component is never marked reachable
-     * and gets pruned, leaving a dangling $ref.
-     *
-     * EXAMPLE DATA is skipped: a literal `"$ref"` inside an `example` value or an
-     * Example Object's `value` is user data, not an OpenAPI reference, so walking
-     * it would wrongly keep an otherwise-unreachable component alive. The skip is
-     * applied ONLY in keyword positions — a schema PROPERTY named "example"
-     * (under `properties`/`$defs`/… where keys are arbitrary names) is still
-     * walked, so its real `$ref` is honoured.
+     * - A `$ref` is normalised to its OWNING component: a JSON Pointer into a
+     *   component (e.g. "#/components/schemas/Pet/properties/id") yields
+     *   "schemas/Pet", so the owning component isn't pruned (which would dangle).
+     * - A `security` keyword yields "securitySchemes/<name>" per requirement.
+     * - EXAMPLE/PAYLOAD DATA is skipped: a literal `"$ref"` or `"security"` key
+     *   inside an `example`/`examples` value is user data, not a real reference,
+     *   so it must not keep an otherwise-unreachable component/scheme alive.
+     * - The keyword guards apply ONLY in keyword positions: a schema PROPERTY
+     *   named "example"/"security"/… (under `properties`/`$defs`/… where keys are
+     *   arbitrary names) is still walked, so its real `$ref` is honoured.
      *
      * @return list<string>
      */
-    private function collectComponentRefs(mixed $node): array
+    private function collectReachableRefs(mixed $node): array
     {
         $refs = [];
         $prefix = '#/components/';
 
         // JSON Schema maps whose keys are arbitrary NAMES (so a key like
-        // "example" there is a property name, not the example keyword).
+        // "example"/"security" there is a property name, not a keyword).
         $nameMaps = ['properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas'];
 
-        $collect = static function (mixed $ref) use (&$refs, $prefix): void {
+        $addComponent = static function (mixed $ref) use (&$refs, $prefix): void {
             if (is_string($ref) && str_starts_with($ref, $prefix)) {
                 $segments = explode('/', substr($ref, strlen($prefix)));
                 if (count($segments) >= 2) {
@@ -655,14 +653,24 @@ final class OpenApiSpecService
             }
         };
 
-        $walk = static function (mixed $value, bool $keysAreNames) use (&$walk, &$collect, $nameMaps): void {
+        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$addComponent, $nameMaps): void {
             if (! is_array($value)) {
                 return;
             }
             foreach ($value as $key => $child) {
                 if (! $keysAreNames) {
                     if ($key === '$ref') {
-                        $collect($child);
+                        $addComponent($child);
+
+                        continue;
+                    }
+
+                    // `security` keyword: a Security Requirement array referencing
+                    // schemes by name (leaf data — no nested refs to recurse).
+                    if ($key === 'security') {
+                        foreach ($this->securityRequirementSchemes($child) as $name) {
+                            $refs[] = 'securitySchemes/'.$name;
+                        }
 
                         continue;
                     }
@@ -680,7 +688,7 @@ final class OpenApiSpecService
                         if (! array_is_list($child)) {
                             foreach ($child as $example) {
                                 if (is_array($example)) {
-                                    $collect($example['$ref'] ?? null);
+                                    $addComponent($example['$ref'] ?? null);
                                 }
                             }
                         }
@@ -690,46 +698,13 @@ final class OpenApiSpecService
                 }
 
                 // Entering a name-map: its children's keys are names, so keyword
-                // skipping must NOT apply at that level.
+                // handling must NOT apply at that level.
                 $childKeysAreNames = ! $keysAreNames && in_array((string) $key, $nameMaps, true);
                 $walk($child, $childKeysAreNames);
             }
         };
 
         $walk($node, false);
-
-        return $refs;
-    }
-
-    /**
-     * Collects "securitySchemes/<name>" for every scheme named in any `security`
-     * requirement found anywhere within a node (operations, callback operations,
-     * reusable path items). Security schemes are referenced by NAME, not $ref, so
-     * the reachability closure must collect them separately.
-     *
-     * @return list<string>
-     */
-    private function collectSecuritySchemeRefs(mixed $node): array
-    {
-        $refs = [];
-
-        $walk = function (mixed $value) use (&$walk, &$refs): void {
-            if (! is_array($value)) {
-                return;
-            }
-            foreach ($value as $key => $child) {
-                if ($key === 'security') {
-                    foreach ($this->securityRequirementSchemes($child) as $name) {
-                        $refs[] = 'securitySchemes/'.$name;
-                    }
-
-                    continue; // `security` holds requirement data, not nested refs
-                }
-                $walk($child);
-            }
-        };
-
-        $walk($node);
 
         return $refs;
     }
