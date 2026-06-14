@@ -1952,6 +1952,68 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_reusable_callback_component_drops_ungranted_operations(): void
+    {
+        // A granted operation references a reusable components.callbacks entry whose
+        // inline path item carries an Admin-tagged operation. The prune keeps the
+        // callback component whole, so it must be tag-filtered: the Admin operation
+        // (and the schema only it references) must not ship to an Orders-only user.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['$ref' => '#/components/callbacks/Shared']],
+            ]]],
+            'components' => [
+                'callbacks' => ['Shared' => ['{$req}' => [
+                    'get' => ['tags' => ['Orders'], 'operationId' => 'cbGet', 'responses' => ['200' => ['description' => 'ok']]],
+                    'post' => [
+                        'tags' => ['Admin'],
+                        'operationId' => 'cbHidden',
+                        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret']]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ],
+                ]]],
+                'schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['callbacks']['Shared']['{$req}'])->toHaveKey('get')
+            ->and($filtered['components']['callbacks']['Shared']['{$req}'])->not->toHaveKey('post')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_reusable_path_item_emptied_by_filtering_is_a_json_object(): void
+    {
+        // A granted operation's callback $refs a components.pathItems whose only
+        // operation is Admin-tagged. After filtering it has no operations; the still
+        // -referenced entry must serialize as "{}" (object), not "[]".
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['{$req}' => ['$ref' => '#/components/pathItems/AdminOnly']]],
+            ]]],
+            'components' => ['pathItems' => ['AdminOnly' => [
+                'post' => ['tags' => ['Admin'], 'operationId' => 'adminOnly', 'responses' => ['200' => ['description' => 'ok']]],
+            ]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $entry = $filtered['components']['pathItems']['AdminOnly'];
+        expect($entry)->toEqual((object) [])
+            ->and(json_encode($entry))->toBe('{}');
+    }
+
     public function test_empty_links_map_is_encoded_as_a_json_object(): void
     {
         // When every link in a response targets a filtered-out operation, the
