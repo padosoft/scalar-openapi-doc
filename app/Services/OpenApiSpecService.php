@@ -612,7 +612,10 @@ final class OpenApiSpecService
      *
      * EXAMPLE DATA is skipped: a literal `"$ref"` inside an `example` value or an
      * Example Object's `value` is user data, not an OpenAPI reference, so walking
-     * it would wrongly keep an otherwise-unreachable component alive.
+     * it would wrongly keep an otherwise-unreachable component alive. The skip is
+     * applied ONLY in keyword positions — a schema PROPERTY named "example"
+     * (under `properties`/`$defs`/… where keys are arbitrary names) is still
+     * walked, so its real `$ref` is honoured.
      *
      * @return list<string>
      */
@@ -620,6 +623,10 @@ final class OpenApiSpecService
     {
         $refs = [];
         $prefix = '#/components/';
+
+        // JSON Schema maps whose keys are arbitrary NAMES (so a key like
+        // "example" there is a property name, not the example keyword).
+        $nameMaps = ['properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas'];
 
         $collect = static function (mixed $ref) use (&$refs, $prefix): void {
             if (is_string($ref) && str_starts_with($ref, $prefix)) {
@@ -630,43 +637,48 @@ final class OpenApiSpecService
             }
         };
 
-        $walk = static function (mixed $value) use (&$walk, &$collect): void {
+        $walk = static function (mixed $value, bool $keysAreNames) use (&$walk, &$collect, $nameMaps): void {
             if (! is_array($value)) {
                 return;
             }
             foreach ($value as $key => $child) {
-                if ($key === '$ref') {
-                    $collect($child);
+                if (! $keysAreNames) {
+                    if ($key === '$ref') {
+                        $collect($child);
 
-                    continue;
-                }
-
-                // `example` (singular) is free-form data — never a ref source.
-                if ($key === 'example') {
-                    continue;
-                }
-
-                // `examples` is either a JSON-Schema array of raw values (data)
-                // or a map of Example Objects. In the map case an entry may be a
-                // real {$ref: #/components/examples/X}; collect that but never
-                // recurse into an example's `value` (data).
-                if ($key === 'examples' && is_array($child)) {
-                    if (! array_is_list($child)) {
-                        foreach ($child as $example) {
-                            if (is_array($example)) {
-                                $collect($example['$ref'] ?? null);
-                            }
-                        }
+                        continue;
                     }
 
-                    continue;
+                    // `example` (singular) keyword is free-form data.
+                    if ($key === 'example') {
+                        continue;
+                    }
+
+                    // `examples` keyword: a JSON-Schema array of raw values
+                    // (data) or a map of Example Objects. In the map case an
+                    // entry may be a real {$ref: #/components/examples/X};
+                    // collect that but never recurse into an example's `value`.
+                    if ($key === 'examples' && is_array($child)) {
+                        if (! array_is_list($child)) {
+                            foreach ($child as $example) {
+                                if (is_array($example)) {
+                                    $collect($example['$ref'] ?? null);
+                                }
+                            }
+                        }
+
+                        continue;
+                    }
                 }
 
-                $walk($child);
+                // Entering a name-map: its children's keys are names, so keyword
+                // skipping must NOT apply at that level.
+                $childKeysAreNames = ! $keysAreNames && in_array((string) $key, $nameMaps, true);
+                $walk($child, $childKeysAreNames);
             }
         };
 
-        $walk($node);
+        $walk($node, false);
 
         return $refs;
     }

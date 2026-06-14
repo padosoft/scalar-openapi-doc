@@ -507,6 +507,36 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Real']);
     }
 
+    public function test_schema_property_named_example_is_still_followed(): void
+    {
+        // A schema with a real PROPERTY named "example" (or "examples") whose
+        // schema $refs a component must keep that component reachable — the
+        // example-keyword skip must not apply to property names.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Wrapper'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Wrapper' => ['type' => 'object', 'properties' => [
+                    'example' => ['$ref' => '#/components/schemas/Inner'],
+                    'examples' => ['$ref' => '#/components/schemas/Inner2'],
+                ]],
+                'Inner' => ['type' => 'object'],
+                'Inner2' => ['type' => 'object'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))
+            ->toContain('Wrapper')->toContain('Inner')->toContain('Inner2');
+    }
+
     public function test_real_example_object_ref_is_preserved(): void
     {
         // A genuine {$ref: #/components/examples/X} in an `examples` MAP is a real
