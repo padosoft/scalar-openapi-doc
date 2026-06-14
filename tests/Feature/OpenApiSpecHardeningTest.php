@@ -1940,6 +1940,58 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
     }
 
+    public function test_verb_named_object_in_a_response_is_not_treated_as_an_operation(): void
+    {
+        // A non-operation object literally named `get` (here inside a granted
+        // response) must NOT be read as an Operation Object — only a verb child of
+        // a real Path Item is. Its `security` annotation is data and must not keep
+        // an unreferenced securityScheme.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => [
+                    'description' => 'ok',
+                    'get' => ['security' => [['InternalAuth' => []]]],
+                ]],
+            ]]],
+            'components' => ['securitySchemes' => [
+                'InternalAuth' => ['type' => 'http', 'scheme' => 'bearer'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
+    }
+
+    public function test_callbacks_inside_a_schema_do_not_keep_a_hidden_callback(): void
+    {
+        // `callbacks` is not valid inside a Schema Object; a schema annotation named
+        // `callbacks` must not keep a (operation-bearing) callback component alive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'callbacks' => ['cb' => ['{$req}' => ['$ref' => '#/components/callbacks/Hidden']]],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['callbacks' => ['Hidden' => [
+                '{$req}' => ['post' => ['operationId' => 'h', 'responses' => ['200' => ['description' => 'ok']]]],
+            ]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('callbacks');
+    }
+
     public function test_operation_level_security_scheme_is_kept(): void
     {
         // Regression for the security-position fix: an OPERATION's own `security`

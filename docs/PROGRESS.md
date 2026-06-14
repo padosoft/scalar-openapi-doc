@@ -130,6 +130,11 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - **`f5edc94`→`46acdab` (Codex round on `f5edc94`, 2 P2 threads):** (1) `security` position — `! $inSchema` was insufficient (responses/headers are also non-schema); now a precise `$securityIsRequirement` flag set only at HTTP-verb/operation level. (2) emptied `paths` serialized as `[]`; now forced to `(object) []` so it's valid `{}`. See LESSON `[security/keyword-meaning-is-positional]`, `[openapi/empty-maps-must-be-json-objects]`. Gates: Pest 164/164, PHPStan max 0, Pint clean. Threads resolved, `@codex review` posted.
 - **Awaiting:** Codex review of `46acdab`; if clean → merge PR #16 → `main`, mark T4 complete, start T5.
 
+### Review-gate policy (decided 2026-06-14, user)
+- **T4 only** has the deep adversarial edge-case tail (it parses the whole OpenAPI 3.1 / JSON-Schema / URI surface). Stay **rigid** here (zero Codex security comments before merge), but flush the class **proactively** (audit sibling branches in one commit) instead of one-finding-per-round.
+- **T5–T9**: Codex gates **only** on security/auth findings; merge on CI+local green otherwise (don't block on non-security nits).
+- **New final task (T10)**: at the very end, run a single deep Copilot review over the whole codebase as the last gate before release.
+
 ## T5 — task/scalar-proxy
 _Not started._
 

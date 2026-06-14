@@ -1156,14 +1156,22 @@ final class OpenApiSpecService
             }
         }
 
+        // Seed from each Path Item under paths/webhooks. We iterate the map in PHP
+        // (the keys are path/webhook NAMES, not keywords) and walk each VALUE as a
+        // path-item position ($pathItemContext=true): so a path-item-level $ref may
+        // reuse a pathItems component, and — crucially — the path item's HTTP-verb
+        // children are recognised as Operation Objects whose `security` is a real
+        // requirement (a non-operation object named "get" elsewhere is not).
+        $seedRefs = [];
+        foreach (['paths', 'webhooks'] as $container) {
+            foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
+                foreach ($this->collectReachableRefs($pathItem, false, true) as $ref) {
+                    $seedRefs[] = $ref;
+                }
+            }
+        }
         $reachable = [];                                   // "schemas/Foo" => true
-        $this->drainReachability([
-            // paths/webhooks are NAME maps (keys are path/webhook names, not
-            // keywords), so seed with $keysAreNames=true — otherwise a webhook
-            // named e.g. "security"/"example" would be misread as a keyword.
-            ...$this->collectReachableRefs($spec['paths'] ?? [], true),
-            ...$this->collectReachableRefs($spec['webhooks'] ?? [], true),
-        ], $reachable, $components, $anchorOwners);
+        $this->drainReachability($seedRefs, $reachable, $components, $anchorOwners);
 
         // Decide root `security` now that the reachable set is known: keep it only
         // if a surviving operation inherits it (inline in paths/webhooks, or in a
@@ -1402,6 +1410,14 @@ final class OpenApiSpecService
                         continue;
                     }
 
+                    // `links`/`callbacks` are OpenAPI Response/Operation fields and
+                    // are NOT valid inside a Schema Object. A schema member named
+                    // "links"/"callbacks" is non-standard data — skip it so it can't
+                    // keep a link/callback (operation-bearing) component alive.
+                    if ($inSchema && ($key === 'links' || $key === 'callbacks')) {
+                        continue;
+                    }
+
                     // JSON Schema anchor declarations (resolved by anchor-fragment
                     // refs). Collected here so anchor scanning shares these guards.
                     if (($key === '$anchor' || $key === '$dynamicAnchor' || $key === '$recursiveAnchor')
@@ -1553,10 +1569,13 @@ final class OpenApiSpecService
                     || in_array($keyStr, $schemaSubMaps, true)
                     || in_array($keyStr, $schemaSubKeys, true)
                 ));
-                // A child keyed by an HTTP verb (in keyword position) is an
-                // Operation Object: its DIRECT `security` is a real requirement.
-                // The flag is single-level — operations' sub-objects reset it.
-                $childSecurityIsRequirement = ! $keysAreNames && in_array($keyStr, self::HTTP_VERBS, true);
+                // A child keyed by an HTTP verb is an Operation Object ONLY when its
+                // parent is a Path Item ($pathItemContext) — otherwise a nested
+                // object literally named `get`/`post` (in a response/header/schema)
+                // would be mistaken for an operation and its `security` annotation
+                // wrongly read as a requirement. Its DIRECT `security` is then a real
+                // requirement; the flag is single-level (sub-objects reset it).
+                $childSecurityIsRequirement = $pathItemContext && ! $keysAreNames && in_array($keyStr, self::HTTP_VERBS, true);
                 $walk($child, $childKeysAreNames, false, $childInSchema, $childSecurityIsRequirement); // sub-content is not a path-item position
             }
         };
