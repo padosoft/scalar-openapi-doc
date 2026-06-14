@@ -148,7 +148,8 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - **`f4230e6`→`2ee7e8f` (2 P2):** (atbW) `callbacks` reachability now gated on operation context (flag renamed `$securityIsRequirement`→`$inOperation`, shared by `security`+`callbacks`) — a `callbacks` member in a response/schema is opaque data, no longer marks components.callbacks reachable. (atbX) a callback `$ref` to a non-callback component is dropped (else dangling). Pest 182/182, PHPStan max 0, Pint clean.
 - **`2ee7e8f`→`fa311b5` (2 P2):** (azQi) in-schema opaque-data skip now covers ALL OpenAPI-only keyed maps (responses/headers/content/encoding/variables/scopes, not just links/callbacks) — a schema-level `responses` annotation no longer leaks components. (azQl) `extractTags` now collects callback/reusable-component operation tags (recursively) so a callback-only tag is grantable. Pest 184/184, PHPStan max 0, Pint clean.
 - **`fa311b5`→`7ac7f92` (1 P2):** in-schema skip list extended with `parameters`/`requestBody` (ref-bearing OpenAPI keys) — a schema annotation can't pull components.parameters/requestBodies + schemas. Pest 185/185, PHPStan max 0, Pint clean.
-- **Awaiting:** Codex review of `7ac7f92`.
+- **`7ac7f92`→`f6d2341` (1 P2):** added `schema` to the in-schema opaque-key set (a `schema` annotation inside a Schema Object is non-standard, not a JSON-Schema keyword). The OpenAPI-only key set is now comprehensive for ref-bearing keys: links, callbacks, security, responses, headers, content, encoding, variables, scopes, parameters, requestBody, schema. Pest 186/186, PHPStan max 0, Pint clean.
+- **Awaiting:** Codex review of `f6d2341`.
 
 ## T5 — task/scalar-proxy
 _Not started._
