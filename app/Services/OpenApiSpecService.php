@@ -1309,14 +1309,22 @@ final class OpenApiSpecService
                 $owning = $aliasRef !== null ? $this->owningComponentRef($aliasRef) : null;
                 $children = ($owning !== null && str_starts_with($owning, $type.'/')) ? [$owning] : [];
             } elseif ($type === 'callbacks') {
+                // A Callback Object may carry a `$ref` alias AND sibling
+                // runtime-expression path items at the same time; BOTH contribute
+                // reachability (a surviving sibling operation can reference schemas).
+                $children = [];
                 if ($aliasRef !== null) {
                     $owning = $this->owningComponentRef($aliasRef); // callback alias
-                    $children = ($owning !== null && str_starts_with($owning, 'callbacks/')) ? [$owning] : [];
-                } else {
-                    // Callback Object: a map of runtime expressions => path items.
-                    $children = [];
-                    foreach ($this->asArray($component) as $pathItem) {
-                        $children = [...$children, ...$this->collectReachableRefs($pathItem, false, true)];
+                    if ($owning !== null && str_starts_with($owning, 'callbacks/')) {
+                        $children[] = $owning;
+                    }
+                }
+                foreach ($this->asArray($component) as $exprKey => $pathItem) {
+                    if ($exprKey === '$ref') {
+                        continue; // handled as the alias above
+                    }
+                    foreach ($this->collectReachableRefs($pathItem, false, true) as $childRef) {
+                        $children[] = $childRef;
                     }
                 }
             } elseif ($type === 'pathItems') {
@@ -1527,18 +1535,20 @@ final class OpenApiSpecService
                             if (! is_array($callback)) {
                                 continue;
                             }
-                            if (isset($callback['$ref'])) {
-                                $addComponent($callback['$ref'], 'callbacks'); // callback ref → callbacks only
+                            // A Callback may carry a `$ref` alias AND sibling
+                            // runtime-expression path items at once — collect the
+                            // alias AND walk every sibling (a surviving sibling
+                            // operation's schema refs must stay reachable).
+                            foreach ($callback as $cbKey => $cbValue) {
+                                if ($cbKey === '$ref') {
+                                    $addComponent($cbValue, 'callbacks'); // callback ref → callbacks only
 
-                                continue;
-                            }
-                            foreach ($callback as $pathItem) {
-                                // Each value is a callback path item — a path-item
-                                // position (not a schema), so its top-level $ref may
-                                // reuse a pathItems component. Its verb children are
-                                // operations (security-requirement context starts at
-                                // the verb level, computed in the generic recursion).
-                                $walk($pathItem, false, true, false, false);
+                                    continue;
+                                }
+                                // A callback path item — a path-item position (not a
+                                // schema), so its top-level $ref may reuse a pathItems
+                                // component; verb children are operations.
+                                $walk($cbValue, false, true, false, false);
                             }
                         }
 

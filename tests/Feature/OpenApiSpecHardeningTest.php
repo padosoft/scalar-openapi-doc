@@ -2084,6 +2084,73 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_inline_callback_ref_sibling_operation_keeps_its_schema_reachable(): void
+    {
+        // An inline callback has a `$ref` alias PLUS a sibling expression whose
+        // UNTAGGED operation (rides with the granted parent) references a schema.
+        // Reachability must walk the sibling so its schema survives — no dangling.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => [
+                    '$ref' => '#/components/callbacks/Public',
+                    '{$req}' => ['post' => [
+                        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/CbBody']]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ]],
+                ]],
+            ]]],
+            'components' => [
+                'callbacks' => ['Public' => ['{$ev}' => ['post' => ['responses' => ['200' => ['description' => 'ok']]]]]],
+                'schemas' => ['CbBody' => ['type' => 'object']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $cb = $filtered['paths']['/a']['get']['callbacks']['cb'];
+        expect($cb['{$req}'])->toHaveKey('post')                       // untagged sibling kept
+            ->and($filtered['components']['schemas'] ?? [])->toHaveKey('CbBody'); // its schema reachable
+    }
+
+    public function test_reusable_callback_ref_sibling_operation_keeps_its_schema(): void
+    {
+        // A reusable components.callbacks entry is both a `$ref` alias and has a
+        // sibling expression path item with an untagged op referencing a schema.
+        // drainReachability must walk the sibling, not only the alias.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['$ref' => '#/components/callbacks/Shared']],
+            ]]],
+            'components' => [
+                'callbacks' => [
+                    'Shared' => [
+                        '$ref' => '#/components/callbacks/Other',
+                        '{$req}' => ['post' => [
+                            'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/CbBody']]]],
+                            'responses' => ['200' => ['description' => 'ok']],
+                        ]],
+                    ],
+                    'Other' => ['{$ev}' => ['post' => ['responses' => ['200' => ['description' => 'ok']]]]],
+                ],
+                'schemas' => ['CbBody' => ['type' => 'object']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['schemas'] ?? [])->toHaveKey('CbBody');
+    }
+
     public function test_callback_path_item_alias_to_surviving_target_keeps_fields(): void
     {
         // A callback path item that is an alias {$ref: Public, parameters:[…]} where
