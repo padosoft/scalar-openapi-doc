@@ -333,7 +333,12 @@ final class OpenApiSpecService
             $valid[] = $entry;
         }
 
-        if ($valid !== []) {
+        // Always override: if the admin activated no (valid) servers, REMOVE the
+        // upstream `servers` so Scalar never shows the upstream URLs — only the
+        // admin-approved set, which here is empty.
+        if ($valid === []) {
+            unset($spec['servers']);
+        } else {
             $spec['servers'] = $valid;
         }
 
@@ -697,8 +702,11 @@ final class OpenApiSpecService
      */
     private function redactMessage(string $message): string
     {
+        // Userinfo group is greedy up to the LAST '@' before the path delimiter,
+        // so a password that itself contains '@' (e.g. user:p@ss@host, which PHP
+        // accepts) is fully stripped, not just up to the first '@'.
         return (string) preg_replace(
-            '~(https?://)(?:[^@/\s]*@)?([^/\s?#]+)([^\s?#]*)[^\s]*~i',
+            '~(https?://)(?:[^/\s?#]*@)?([^/\s?#]+)([^\s?#]*)[^\s]*~i',
             '$1$2$3',
             $message
         );

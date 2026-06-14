@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Exceptions\InvalidOpenApiSpecException;
 use App\Services\OpenApiSpecService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -91,13 +92,19 @@ class OpenApiSpecHardeningTest extends TestCase
 
     public function test_redacts_upstream_url_secrets_when_logging_failures(): void
     {
-        // Userinfo + signed query in the upstream URL must never reach the logs.
+        // Userinfo (incl. a password containing '@') + signed query in the
+        // upstream URL must never reach the logs — not in the url context, nor
+        // via the HTTP client's exception message.
         config([
-            'openapi.upstream_url' => 'https://user:secret@specs.example.com/openapi.json?token=abc123',
+            'openapi.upstream_url' => 'https://user:p@ss@specs.example.com/openapi.json?token=abc123',
             'openapi.allowed_hosts' => ['specs.example.com'],
         ]);
         Cache::flush();
-        Http::fake(['*' => Http::response('error', 500)]);
+        Http::fake(function (): void {
+            throw new ConnectionException(
+                'cURL error 7: Failed to connect to https://user:p@ss@specs.example.com/openapi.json?token=abc123'
+            );
+        });
         Log::spy();
 
         try {
@@ -109,9 +116,9 @@ class OpenApiSpecHardeningTest extends TestCase
         Log::shouldHaveReceived('error')->withArgs(function (string $message, array $context): bool {
             $blob = $message.' '.(string) json_encode($context);
 
-            return ! str_contains($blob, 'secret')
-                && ! str_contains($blob, 'abc123')
-                && ! str_contains($blob, 'user:secret')
+            return ! str_contains($blob, 'abc123')      // signed query token
+                && ! str_contains($blob, 'p@ss')        // password (with '@')
+                && ! str_contains($blob, 'user:')       // userinfo
                 && is_string($context['url'] ?? null)
                 && str_contains($context['url'], 'specs.example.com');
         })->once();
@@ -520,6 +527,19 @@ class OpenApiSpecHardeningTest extends TestCase
             ['url' => 'https://api.example.com', 'description' => 'Prod'],
             ['url' => 'https://staging.example.com'],
         ]);
+    }
+
+    public function test_inject_servers_clears_upstream_servers_when_none_active(): void
+    {
+        // Admin deactivated all servers (empty/all-invalid list): the upstream's
+        // own servers must be REMOVED, never shown to users.
+        $spec = ['openapi' => '3.1.0', 'servers' => [['url' => 'https://upstream.internal/api']]];
+
+        $emptied = $this->service()->injectServers($spec, []);
+        expect($emptied)->not->toHaveKey('servers');
+
+        $allInvalid = $this->service()->injectServers($spec, [['url' => 'not-a-url'], ['url' => '   ']]);
+        expect($allInvalid)->not->toHaveKey('servers');
     }
 
     public function test_inject_servers_rejects_non_url_and_unsafe_scheme_values(): void
