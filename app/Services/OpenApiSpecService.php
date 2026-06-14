@@ -410,6 +410,12 @@ final class OpenApiSpecService
             $components['links'] = $links;
         }
 
+        // Reusable responses ($ref'd by surviving operations) can also hold Link
+        // Objects with a `server` — strip those too (same shape as inline responses).
+        if (is_array($components['responses'] ?? null)) {
+            $components['responses'] = $this->stripLinkServers($components['responses']);
+        }
+
         $spec['components'] = $components;
 
         return $spec;

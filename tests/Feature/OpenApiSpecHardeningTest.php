@@ -586,6 +586,25 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($out['components']['links']['Shared'])->not->toHaveKey('server');
     }
 
+    public function test_inject_servers_strips_link_servers_in_reusable_responses(): void
+    {
+        // A Link Object's `server` inside a reusable components.responses entry
+        // must be stripped too (reachable via a surviving operation's $ref).
+        $spec = [
+            'openapi' => '3.1.0',
+            'paths' => ['/x' => ['get' => ['responses' => ['201' => ['$ref' => '#/components/responses/Created']]]]],
+            'components' => ['responses' => [
+                'Created' => ['description' => 'created', 'links' => [
+                    'next' => ['operationId' => 'getNext', 'server' => ['url' => 'https://internal.upstream/rlink']],
+                ]],
+            ]],
+        ];
+
+        $out = $this->service()->injectServers($spec, [['url' => 'https://api.example.com']]);
+
+        expect($out['components']['responses']['Created']['links']['next'])->not->toHaveKey('server');
+    }
+
     public function test_inject_servers_does_not_log_credentials_for_rejected_entries(): void
     {
         Log::spy();
