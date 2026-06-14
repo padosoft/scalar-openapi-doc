@@ -2084,6 +2084,53 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_numeric_keyed_schema_annotation_is_opaque(): void
+    {
+        // A non-standard NUMERIC keyword in a schema (json_decode stores "0" as int)
+        // is not a JSON-Schema keyword — it must be skipped, not traversed for refs.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        0 => ['$ref' => '#/components/schemas/Secret'],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_relative_same_document_ref_resolves_against_userinfo_upstream(): void
+    {
+        // When the upstream URL itself has userinfo, a relative same-document ref
+        // must still resolve to the SAME document (userinfo carried through), so its
+        // local component is kept — not pruned as external.
+        config(['openapi.upstream_url' => 'https://user:pass@specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => './openapi.json#/components/schemas/Pet'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Pet' => ['type' => 'object'], 'Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
+    }
+
     public function test_schema_annotation_objects_are_opaque(): void
     {
         // xml/externalDocs (and any non-JSON-Schema annotation object) inside a

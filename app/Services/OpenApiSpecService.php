@@ -793,7 +793,19 @@ final class OpenApiSpecService
             return $this->normalizeAbsolute($scheme.':'.$ref); // protocol-relative
         }
 
-        $origin = $scheme.'://'.$baseParts['host'].(isset($baseParts['port']) ? ':'.$baseParts['port'] : '');
+        // Carry the base's userinfo so a relative ref resolves to the SAME
+        // normalized authority as the upstream (which now keeps userinfo); otherwise
+        // a userinfo-bearing upstream would make every relative same-document ref
+        // look external and prune its local components.
+        $userInfo = '';
+        if (isset($baseParts['user'])) {
+            $userInfo = (string) $baseParts['user'];
+            if (isset($baseParts['pass'])) {
+                $userInfo .= ':'.(string) $baseParts['pass'];
+            }
+            $userInfo .= '@';
+        }
+        $origin = $scheme.'://'.$userInfo.$baseParts['host'].(isset($baseParts['port']) ? ':'.$baseParts['port'] : '');
         $basePath = is_string($baseParts['path'] ?? null) ? $baseParts['path'] : '/';
 
         $q = strpos($ref, '?');
@@ -1517,11 +1529,14 @@ final class OpenApiSpecService
                     // ONLY known JSON-Schema keywords (refs/anchors/discriminator here,
                     // subschema keywords below). Any other keyword-position member is
                     // opaque annotation/scalar DATA and is skipped, so it can never
-                    // pull a component into the filtered spec.
-                    if ($inSchema && is_string($key)
-                        && ! in_array($key, $schemaKeywords, true)
-                        && ! in_array($key, $schemaSubMaps, true)
-                        && ! in_array($key, $schemaSubKeys, true)
+                    // pull a component into the filtered spec. A non-string key (e.g. a
+                    // numeric `"0"` keyword that json_decode stores as int) is never a
+                    // JSON-Schema keyword, so it is skipped too.
+                    if ($inSchema
+                        && (! is_string($key)
+                            || (! in_array($key, $schemaKeywords, true)
+                                && ! in_array($key, $schemaSubMaps, true)
+                                && ! in_array($key, $schemaSubKeys, true)))
                     ) {
                         continue;
                     }
