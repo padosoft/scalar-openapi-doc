@@ -1421,13 +1421,21 @@ final class OpenApiSpecService
     /**
      * A playground server URL must be a syntactically valid ABSOLUTE http(s)
      * URL. This rejects empty/whitespace, schemeless ("not-a-url"), unsafe
-     * schemes ("javascript:…") and CREDENTIAL-bearing URLs
-     * ("https://user:pass@host", which would ship credentials to every user's
-     * browser) before they reach the spec the browser renders.
+     * schemes ("javascript:…"), CREDENTIAL-bearing URLs ("https://user:pass@host",
+     * which would ship credentials to every user's browser) and malformed values
+     * parse_url tolerates ("https://exa mple.com") before they reach the spec.
+     *
+     * OpenAPI Server Variables ({var}) are allowed: they're substituted with a
+     * placeholder before validation so a templated URL still passes.
      */
     private function isValidServerUrl(string $url): bool
     {
-        $parts = parse_url(trim($url));
+        // Substitute {server variables} so filter_var (which rejects braces) can
+        // validate the URL syntax; validation runs on this normalised form while
+        // the original templated URL is what gets stored.
+        $normalized = (string) preg_replace('/\{[^{}]*\}/', '1', trim($url));
+
+        $parts = parse_url($normalized);
         if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
             return false;
         }
@@ -1436,7 +1444,11 @@ final class OpenApiSpecService
             return false; // never expose embedded credentials client-side
         }
 
-        return in_array(strtolower((string) $parts['scheme']), ['http', 'https'], true);
+        if (! in_array(strtolower((string) $parts['scheme']), ['http', 'https'], true)) {
+            return false;
+        }
+
+        return filter_var($normalized, FILTER_VALIDATE_URL) !== false;
     }
 
     /**

@@ -1091,6 +1091,18 @@ class OpenApiSpecHardeningTest extends TestCase
         })->once();
     }
 
+    public function test_inject_servers_rejects_malformed_url_but_keeps_server_variables(): void
+    {
+        // parse_url tolerates a space in the host; filter_var rejects it. A
+        // templated URL (OpenAPI server variable) must still be accepted.
+        $out = $this->service()->injectServers(['openapi' => '3.1.0'], [
+            ['url' => 'https://exa mple.com'],
+            ['url' => 'https://{region}.api.example.com/v1'],
+        ]);
+
+        expect($out['servers'])->toBe([['url' => 'https://{region}.api.example.com/v1']]);
+    }
+
     public function test_inject_servers_rejects_credential_bearing_url(): void
     {
         // A server URL with embedded userinfo would ship credentials to the
