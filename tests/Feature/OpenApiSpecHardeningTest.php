@@ -583,6 +583,36 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components']['schemas'] ?? [])->toBe([]);
     }
 
+    public function test_keeps_discriminator_mapping_target_schemas(): void
+    {
+        // discriminator.mapping values are schema refs (by URI or bare name) not
+        // under a $ref key; the mapped concrete schemas must survive pruning.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/pet' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Pet'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Pet' => ['type' => 'object', 'discriminator' => ['propertyName' => 'type', 'mapping' => [
+                    'dog' => '#/components/schemas/Dog',
+                    'cat' => 'Cat',
+                ]]],
+                'Dog' => ['type' => 'object'],
+                'Cat' => ['type' => 'object'],
+                'Unused' => ['type' => 'string'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))
+            ->toContain('Pet')->toContain('Dog')->toContain('Cat')->not->toContain('Unused');
+    }
+
     public function test_follows_ref_from_a_root_security_scheme_alias(): void
     {
         // Root security names ApiKeyAuth, which is a Reference Object to BearerAuth.

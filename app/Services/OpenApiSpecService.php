@@ -668,7 +668,7 @@ final class OpenApiSpecService
             }
         };
 
-        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$addComponent, $nameMaps): void {
+        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$addComponent, $nameMaps, $prefix): void {
             if (! is_array($value)) {
                 return;
             }
@@ -685,6 +685,25 @@ final class OpenApiSpecService
                     if ($key === 'security') {
                         foreach ($this->securityRequirementSchemes($child) as $name) {
                             $refs[] = 'securitySchemes/'.$name;
+                        }
+
+                        continue;
+                    }
+
+                    // `discriminator.mapping` values are schema references by URI
+                    // or bare name (NOT under a $ref key), so collect them or the
+                    // polymorphic target schemas get pruned.
+                    if ($key === 'discriminator') {
+                        $mapping = is_array($child) ? ($child['mapping'] ?? null) : null;
+                        foreach ($this->asArray($mapping) as $target) {
+                            if (! is_string($target)) {
+                                continue;
+                            }
+                            if (str_starts_with($target, $prefix)) {
+                                $addComponent($target);            // explicit component ref
+                            } elseif (! str_contains($target, '/') && ! str_contains($target, '#')) {
+                                $refs[] = 'schemas/'.$target;      // bare name => schema
+                            }
                         }
 
                         continue;
