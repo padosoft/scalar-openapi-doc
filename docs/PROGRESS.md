@@ -114,6 +114,14 @@ Branch: `task/openapi-service-4-8-pathitem-refs`. Follow-up after a Codex findin
 - **Gates:** Pest 94/94, PHPStan max 0, Pint clean. 8 Codex findings across 7 rounds, all fixed/resolved. (Final commit `dd32674`: Codex unresponsive to re-nudges over ~50 min while CI green + 0 unresolved threads; merged per the Copilot-outage exception — the macro PR → main provides the next full Codex gate over the same code.)
 - **Next:** macro PR `task/openapi-service` → `main` (Codex + CI + local gates), merge, mark T4 complete, then T5.
 
+### Macro PR #16 — `task/openapi-service` → `main` (in review)
+Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening deep OpenAPI 3.1 / JSON-Schema-2020-12 / URI-resolution edge cases (each a separate commit, threads resolved):
+- query-string in ref-document comparison; position-aware operation-bearing refs; full-URI relative resolution; normalize absolute/protocol-relative refs; sibling target fields checked even with a link `$ref`; link dropped if any local target field is filtered; normalize URI origin case/port; alias-link sibling checks.
+- **`a928661`→`027018a` (P1, latest):** "drop non-link local `$ref`s from Link Objects" enforced across **all three** reachability sites — inline-link survival (`linkTargetSurvives`), `components.links` alias fixpoint, and `drainReachability` example/link/callback alias branch: a same-document `$ref` to the wrong component type is dropped (never kept/followed); only truly external refs are kept conservatively. Plus `scopes` added to the keyword-name-map guard (OAuth2 scope named `$ref` is data, not a reference). New tests: malformed link `$ref` to a schema dropped without leak; scope `$ref` ignored. See LESSON `[security/component-alias-same-type]`.
+- **Gates on `027018a`:** Pest 152/152, PHPStan max 0, Pint clean; **CI all green** (frontend, php 8.4/8.5, quality, e2e, 0 failures). All 50 review threads resolved.
+- **Blocker:** local `copilot` review gate hit `402 additional_spend_limit_reached` (usage cap) — skipped with the binding remote **Codex** review as the gate (see LESSON `[review/copilot-spend-limit]`). Re-attempt local Copilot when the limit resets.
+- **Awaiting:** Codex review of `027018a`; if clean → merge PR #16 → `main`, mark T4 complete, start T5.
+
 ## T5 — task/scalar-proxy
 _Not started._
 
