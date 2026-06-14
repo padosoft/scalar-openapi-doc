@@ -283,19 +283,13 @@ final class OpenApiSpecService
             ));
         }
 
-        // Root `security` applies only to operations that don't override it. If
-        // no surviving operation inherits it, the requirement is vacuous — and
-        // would dangle (referencing a securityScheme that pruning then removes),
-        // yielding an invalid spec. Drop it in that case.
-        if (isset($spec['security']) && ! $this->inheritsRootSecurity($spec)) {
-            unset($spec['security']);
-        }
-
         // Always prune unreachable components from the filtered spec (security
         // invariant: never ship the definitions of ungranted operations/schemas,
         // and never leave a dangling $ref). The closure follows callbacks →
         // pathItems, so a pathItem reused through a granted operation's callback
         // (inline or via a components.callbacks ref) is correctly preserved.
+        // pruneComponents also drops a now-vacuous root `security` (when no
+        // surviving operation inherits it) using the reachability it computes.
         $spec = $this->pruneComponents($spec);
 
         return $spec;
@@ -528,13 +522,20 @@ final class OpenApiSpecService
     {
         $components = $spec['components'] ?? null;
         if (! is_array($components)) {
+            // No components to prune, but a vacuous root `security` (no inline
+            // operation inherits it) is still dropped.
+            if (isset($spec['security']) && ! $this->inheritsRootSecurity($spec, [])) {
+                unset($spec['security']);
+            }
+
             return $spec;
         }
 
-        // Seed reachability from $refs under paths AND webhooks (path-item-level
-        // $refs are covered too — collectComponentRefs walks the whole subtree).
-        // securitySchemes are referenced by NAME via `security` (not by $ref), so
-        // they are collected separately and seeded from operations + root.
+        // Seed reachability from $refs and operation-level security under paths
+        // AND webhooks (path-item-level $refs covered — collectComponentRefs walks
+        // the subtree). Root `security` schemes are intentionally NOT seeded yet:
+        // whether root security survives depends on the reachable set computed
+        // below, so seeding it up front could keep schemes no visible op uses.
         $reachable = [];                                   // "schemas/Foo" => true
         $queue = [
             ...$this->collectComponentRefs($spec['paths'] ?? []),
@@ -542,9 +543,6 @@ final class OpenApiSpecService
             ...$this->collectSecuritySchemeRefs($spec['paths'] ?? []),
             ...$this->collectSecuritySchemeRefs($spec['webhooks'] ?? []),
         ];
-        foreach ($this->securityRequirementSchemes($spec['security'] ?? null) as $schemeName) {
-            $queue[] = 'securitySchemes/'.$schemeName;
-        }
 
         while ($queue !== []) {
             $ref = array_pop($queue);
@@ -563,6 +561,12 @@ final class OpenApiSpecService
                 continue;
             }
 
+            // An Example Object's `value` is free-form DATA — never follow refs
+            // inside it (a literal "$ref" there is not an OpenAPI reference).
+            if ($type === 'examples') {
+                continue;
+            }
+
             // Follow both $ref children AND security-scheme names declared inside
             // this reachable component (e.g. a callback/pathItem operation's
             // `security`), so callback-only schemes are kept, not pruned.
@@ -570,6 +574,20 @@ final class OpenApiSpecService
                 if (! isset($reachable[$child])) {
                     $queue[] = $child;
                 }
+            }
+        }
+
+        // Decide root `security` now that the reachable set is known: keep it only
+        // if a surviving operation inherits it (inline in paths/webhooks, or in a
+        // REACHABLE components.pathItems/callbacks). Its schemes are then reachable
+        // too; otherwise the vacuous requirement is dropped.
+        if (isset($spec['security'])) {
+            if ($this->inheritsRootSecurity($spec, $reachable)) {
+                foreach ($this->securityRequirementSchemes($spec['security']) as $schemeName) {
+                    $reachable['securitySchemes/'.$schemeName] = true;
+                }
+            } else {
+                unset($spec['security']);
             }
         }
 
@@ -760,19 +778,22 @@ final class OpenApiSpecService
     }
 
     /**
-     * Whether at least one surviving operation inherits the root `security` —
+     * Whether at least one SURVIVING operation inherits the root `security` —
      * i.e. lacks its own `security` key. An operation that declares `security`
      * (including `security: []`, an explicit opt-out) does not inherit root; one
-     * without the key does. This counts operations in paths/webhooks AND in their
-     * (and the components') callbacks/reusable path items, since a callback
-     * operation without `security` also inherits the API-wide requirement —
-     * dropping root security then would strip auth a callback still relies on.
-     * (Over-counting an unreachable component op only keeps root security around
-     * harmlessly; it never creates a dangling reference.)
+     * without the key does.
+     *
+     * Counts operations inline in paths/webhooks (and their inline callbacks) and
+     * those in components.pathItems/callbacks that are REACHABLE (per $reachable
+     * keyed "type/name"), since a callback operation without `security` inherits
+     * the API-wide requirement. Unreachable components are excluded so they can't
+     * keep root security — and its securityScheme metadata — alive for endpoints
+     * the user can't see.
      *
      * @param  array<array-key, mixed>  $spec
+     * @param  array<string, true>  $reachable
      */
-    private function inheritsRootSecurity(array $spec): bool
+    private function inheritsRootSecurity(array $spec, array $reachable): bool
     {
         foreach (['paths', 'webhooks'] as $container) {
             foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
@@ -783,12 +804,15 @@ final class OpenApiSpecService
         }
 
         $components = $this->asArray($spec['components'] ?? null);
-        foreach ($this->asArray($components['pathItems'] ?? null) as $pathItem) {
-            if ($this->pathItemInheritsRootSecurity($pathItem)) {
+        foreach ($this->asArray($components['pathItems'] ?? null) as $name => $pathItem) {
+            if (isset($reachable['pathItems/'.$name]) && $this->pathItemInheritsRootSecurity($pathItem)) {
                 return true;
             }
         }
-        foreach ($this->asArray($components['callbacks'] ?? null) as $callback) {
+        foreach ($this->asArray($components['callbacks'] ?? null) as $name => $callback) {
+            if (! isset($reachable['callbacks/'.$name])) {
+                continue;
+            }
             foreach ($this->asArray($callback) as $pathItem) {
                 if ($this->pathItemInheritsRootSecurity($pathItem)) {
                     return true;
