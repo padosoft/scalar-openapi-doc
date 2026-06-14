@@ -482,6 +482,72 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Node']);
     }
 
+    public function test_callback_expression_keyed_like_keyword_is_walked(): void
+    {
+        // A callback whose expression key looks like a keyword ("x-cb"/"security")
+        // must still be walked, so schemas used only by it survive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['security' => ['x-cb' => ['post' => [
+                    'requestBody' => ['content' => ['application/json' => [
+                        'schema' => ['$ref' => '#/components/schemas/CbPayload'],
+                    ]]],
+                    'responses' => ['200' => ['description' => 'ack']],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['CbPayload' => ['type' => 'object'], 'Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['CbPayload']);
+    }
+
+    public function test_false_anchor_in_link_component_is_ignored(): void
+    {
+        // A $dynamicAnchor inside a components.links Link Object's requestBody is
+        // data, not a real anchor — a $dynamicRef must not resurrect that link.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$dynamicRef' => '#node'],
+                ]]]],
+            ]]],
+            'components' => ['links' => ['Hidden' => ['operationId' => 'x', 'requestBody' => ['$dynamicAnchor' => 'node']]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->toBe([]);
+    }
+
+    public function test_drops_link_with_malformed_local_operationref(): void
+    {
+        // A local operationRef with no method segment can't resolve — drop the
+        // link rather than leaking the path string.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'links' => [
+                    'bad' => ['operationRef' => '#/paths/~1internal'],
+                ]]],
+            ]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_false_anchor_in_example_data_is_ignored(): void
     {
         // A $dynamicAnchor inside example DATA is not a real anchor, so a

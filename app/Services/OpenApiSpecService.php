@@ -606,7 +606,7 @@ final class OpenApiSpecService
             $rest = substr($operationRef, strlen($prefix));
             $pos = strrpos($rest, '/'); // path/key may contain '/'; method is last
             if ($pos === false) {
-                return true;
+                return false; // malformed local ref (no method) — drop conservatively
             }
 
             $key = str_replace(['~1', '~0'], ['/', '~'], substr($rest, 0, $pos));
@@ -884,7 +884,11 @@ final class OpenApiSpecService
         // keeps the anchored component reachable instead of dangling.
         $anchorOwners = [];
         foreach ($components as $type => $entries) {
-            if (! is_array($entries)) {
+            // Anchors ($anchor/$dynamicAnchor) only live in SCHEMA objects, so
+            // component types that hold no schemas (Example/Link/SecurityScheme)
+            // can't declare a real anchor — skip them to avoid false owners from
+            // their data payloads.
+            if (! is_array($entries) || in_array((string) $type, ['examples', 'links', 'securitySchemes'], true)) {
                 continue;
             }
             foreach ($entries as $name => $entry) {
@@ -995,10 +999,19 @@ final class OpenApiSpecService
 
             // Example and Link components: follow only a top-level $ref (their
             // other fields are data — an Example's `value`, a Link's
-            // parameters/requestBody). Other components are walked in full.
-            $children = in_array($type, ['examples', 'links'], true)
-                ? $this->collectReachableRefs(['$ref' => (is_array($component) ? ($component['$ref'] ?? null) : null)])
-                : $this->collectReachableRefs($component);
+            // parameters/requestBody). A Callback component is a map of runtime
+            // expressions => path items, so walk each path item. Everything else
+            // is walked in full.
+            if (in_array($type, ['examples', 'links'], true)) {
+                $children = $this->collectReachableRefs(['$ref' => (is_array($component) ? ($component['$ref'] ?? null) : null)]);
+            } elseif ($type === 'callbacks') {
+                $children = [];
+                foreach ($this->asArray($component) as $pathItem) {
+                    $children = [...$children, ...$this->collectReachableRefs($pathItem)];
+                }
+            } else {
+                $children = $this->collectReachableRefs($component);
+            }
 
             foreach ($children as $child) {
                 if (! isset($reachable[$child])) {
@@ -1023,9 +1036,11 @@ final class OpenApiSpecService
                 return;
             }
             foreach ($value as $key => $child) {
-                // Skip data subtrees (a $dynamicAnchor inside example/x-* data is
-                // not a real schema anchor), matching collectReachableRefs.
-                if (in_array($key, ['example', 'examples', 'default', 'const', 'enum'], true)
+                // Skip data subtrees (a $dynamicAnchor inside example/link/x-*
+                // data is not a real schema anchor), matching collectReachableRefs.
+                // `links` Link Objects hold no schemas; their parameters/requestBody
+                // are data.
+                if (in_array($key, ['example', 'examples', 'default', 'const', 'enum', 'links'], true)
                     || (is_string($key) && str_starts_with($key, 'x-'))
                 ) {
                     continue;
@@ -1080,7 +1095,7 @@ final class OpenApiSpecService
         // path item is then walked in keyword position.
         $nameMaps = [
             'properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas',
-            'headers', 'content', 'encoding', 'callbacks', 'variables', 'responses',
+            'headers', 'content', 'encoding', 'variables', 'responses',
         ];
 
         $addComponent = static function (mixed $ref) use (&$refs, $prefix): void {
@@ -1134,6 +1149,29 @@ final class OpenApiSpecService
                         foreach ($child as $link) {
                             if (is_array($link)) {
                                 $addComponent($link['$ref'] ?? null);
+                            }
+                        }
+
+                        continue;
+                    }
+
+                    // `callbacks` map: callbackName => Callback ($ref to
+                    // components.callbacks, OR a map of runtime-EXPRESSION keys =>
+                    // path items). Both the callback-name and expression levels are
+                    // arbitrary names, so walk the path items directly (in keyword
+                    // position) rather than misreading an expression as a keyword.
+                    if ($key === 'callbacks' && is_array($child)) {
+                        foreach ($child as $callback) {
+                            if (! is_array($callback)) {
+                                continue;
+                            }
+                            if (isset($callback['$ref'])) {
+                                $addComponent($callback['$ref']);
+
+                                continue;
+                            }
+                            foreach ($callback as $pathItem) {
+                                $walk($pathItem, false);
                             }
                         }
 
