@@ -873,8 +873,11 @@ final class OpenApiSpecService
         // below, so seeding it up front could keep schemes no visible op uses.
         $reachable = [];                                   // "schemas/Foo" => true
         $this->drainReachability([
-            ...$this->collectReachableRefs($spec['paths'] ?? []),
-            ...$this->collectReachableRefs($spec['webhooks'] ?? []),
+            // paths/webhooks are NAME maps (keys are path/webhook names, not
+            // keywords), so seed with $keysAreNames=true — otherwise a webhook
+            // named e.g. "security"/"example" would be misread as a keyword.
+            ...$this->collectReachableRefs($spec['paths'] ?? [], true),
+            ...$this->collectReachableRefs($spec['webhooks'] ?? [], true),
         ], $reachable, $components);
 
         // Decide root `security` now that the reachable set is known: keep it only
@@ -983,9 +986,12 @@ final class OpenApiSpecService
      *   named "example"/"security"/… (under `properties`/`$defs`/… where keys are
      *   arbitrary names) is still walked, so its real `$ref` is honoured.
      *
+     * Pass $keysAreNames=true when $node is itself a NAME map (e.g. the top-level
+     * paths/webhooks maps, whose keys are arbitrary path/webhook names).
+     *
      * @return list<string>
      */
-    private function collectReachableRefs(mixed $node): array
+    private function collectReachableRefs(mixed $node, bool $keysAreNames = false): array
     {
         $refs = [];
         $prefix = '#/components/';
@@ -1073,7 +1079,7 @@ final class OpenApiSpecService
             }
         };
 
-        $walk($node, false);
+        $walk($node, $keysAreNames);
 
         return $refs;
     }

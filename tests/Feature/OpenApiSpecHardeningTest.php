@@ -745,6 +745,28 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_webhook_named_like_a_keyword_is_still_walked(): void
+    {
+        // A webhook named "security" must be walked as a name, not misread as the
+        // security keyword — else schemas used only by it get pruned (dangling).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'webhooks' => ['security' => ['post' => [
+                'tags' => ['Webhooks'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Payload'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Payload' => ['type' => 'object'], 'Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Webhooks']), collect([]));
+
+        expect(array_keys($filtered['webhooks']))->toBe(['security'])
+            ->and(array_keys($filtered['components']['schemas']))->toBe(['Payload']);
+    }
+
     public function test_keeps_discriminator_mapping_target_schemas(): void
     {
         // discriminator.mapping values are schema refs (by URI or bare name) not
