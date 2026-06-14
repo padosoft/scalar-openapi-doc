@@ -280,16 +280,13 @@ final class OpenApiSpecService
         }
 
         // Reusable path items were inlined into paths/webhooks (no path-item
-        // $ref survives), so components.pathItems still holds the UNFILTERED
-        // originals. Drop the whole bucket regardless of the prune_components
-        // toggle — otherwise, with pruning disabled, a non-admin would receive
-        // the ungranted operations of an inlined component verbatim.
-        if (isset($spec['components']) && is_array($spec['components'])) {
-            unset($spec['components']['pathItems']);
-            if ($spec['components'] === []) {
-                unset($spec['components']);
-            }
-        }
+        // $ref survives there), so a role-1 reuse source is now unreferenced and
+        // its UNFILTERED operations must not survive. Scrub components.pathItems
+        // by reachability ALWAYS (independent of the prune_components toggle):
+        // an unreferenced item is dropped (closing the prune-off leak), while one
+        // still referenced by a surviving operation's callback $ref is kept
+        // (preserving valid callback documentation).
+        $spec = $this->scrubUnreachablePathItems($spec);
 
         // Root `security` applies only to operations that don't override it. If
         // no surviving operation inherits it, the requirement is vacuous — and
@@ -456,6 +453,79 @@ final class OpenApiSpecService
         $walk($node);
 
         return $refs;
+    }
+
+    /**
+     * Removes components.pathItems entries not reachable (transitively) from the
+     * surviving paths/webhooks. Runs ALWAYS — independent of prune_components —
+     * because pathItems hold operation definitions: after inlining, an orphaned
+     * reuse source must be dropped (or its unfiltered operations leak), while a
+     * pathItem still referenced by a surviving callback $ref must be kept.
+     *
+     * @param  array<string, mixed>  $spec
+     * @return array<string, mixed>
+     */
+    private function scrubUnreachablePathItems(array $spec): array
+    {
+        $components = $spec['components'] ?? null;
+        if (! is_array($components) || ! is_array($components['pathItems'] ?? null)) {
+            return $spec;
+        }
+
+        /** @var array<array-key, mixed> $pathItems */
+        $pathItems = $components['pathItems'];
+
+        $reachable = [];
+        $queue = [
+            ...$this->collectPathItemRefs($spec['paths'] ?? []),
+            ...$this->collectPathItemRefs($spec['webhooks'] ?? []),
+        ];
+        while ($queue !== []) {
+            $name = array_pop($queue);
+            if (isset($reachable[$name]) || ! array_key_exists($name, $pathItems)) {
+                continue;
+            }
+            $reachable[$name] = true;
+            foreach ($this->collectPathItemRefs($pathItems[$name]) as $child) {
+                if (! isset($reachable[$child])) {
+                    $queue[] = $child;
+                }
+            }
+        }
+
+        $kept = array_intersect_key($pathItems, $reachable);
+        if ($kept === []) {
+            unset($components['pathItems']);
+        } else {
+            $components['pathItems'] = $kept;
+        }
+
+        if ($components === []) {
+            unset($spec['components']);
+        } else {
+            $spec['components'] = $components;
+        }
+
+        return $spec;
+    }
+
+    /**
+     * Names of components.pathItems referenced ("$ref": "#/components/pathItems/X")
+     * anywhere within a node (e.g. a surviving operation's callbacks).
+     *
+     * @return list<string>
+     */
+    private function collectPathItemRefs(mixed $node): array
+    {
+        $names = [];
+        $prefix = 'pathItems/';
+        foreach ($this->collectComponentRefs($node) as $ref) {
+            if (str_starts_with($ref, $prefix)) {
+                $names[] = substr($ref, strlen($prefix));
+            }
+        }
+
+        return $names;
     }
 
     // ---------------------------------------------------------------------

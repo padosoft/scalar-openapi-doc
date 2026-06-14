@@ -297,6 +297,32 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components']['pathItems'] ?? [])->toBe([]);
     }
 
+    public function test_preserves_path_item_referenced_by_a_granted_operation_callback(): void
+    {
+        // A granted operation's callback $refs components.pathItems.CallbackDoc;
+        // that pathItem must survive (valid callback docs), while an unreferenced
+        // reuse source (OrphanReuse) is scrubbed — even with pruning OFF.
+        config(['openapi.prune_components' => false]);
+
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['{$request.body#/cb}' => ['$ref' => '#/components/pathItems/CallbackDoc']]],
+            ]]],
+            'components' => ['pathItems' => [
+                'CallbackDoc' => ['post' => ['responses' => ['200' => ['description' => 'ack']]]],
+                'OrphanReuse' => ['get' => ['responses' => ['200' => ['description' => 'x']]]],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['pathItems']))->toBe(['CallbackDoc']);
+    }
+
     public function test_path_item_ref_operations_are_grantable_by_endpoint(): void
     {
         $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect([]), collect(['GET /reused']));
