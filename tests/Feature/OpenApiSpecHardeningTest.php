@@ -200,16 +200,6 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered)->not->toHaveKey('security');
     }
 
-    public function test_prune_components_off_keeps_all_components(): void
-    {
-        config(['openapi.prune_components' => false]);
-
-        $filtered = $this->service()->filterForUser($this->spec31(), collect(['Orders']), collect([]));
-
-        expect(array_keys($filtered['components']['schemas']))
-            ->toContain('OrderEvent')->toContain('Orphan')->toContain('WebhookPayload');
-    }
-
     // ---- metadata includes webhooks (grant UI consistency) ----------------
 
     public function test_extract_tags_includes_webhook_tags(): void
@@ -247,6 +237,192 @@ class OpenApiSpecHardeningTest extends TestCase
         $byWebhook = $this->service()->filterForUser($spec, collect([]), collect(['POST webhook:/orders']));
         expect($byWebhook['paths'])->toBe([])
             ->and(array_keys($byWebhook['webhooks']))->toBe(['/orders']);
+    }
+
+    // ---- B4: path-item $ref reuse (OpenAPI 3.1 components.pathItems) -------
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function specWithPathItemRef(): array
+    {
+        return [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/reused' => ['$ref' => '#/components/pathItems/Reused']],
+            'components' => [
+                'pathItems' => [
+                    'Reused' => [
+                        'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+                        'delete' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    public function test_resolves_path_item_ref_and_filters_inlined_operations(): void
+    {
+        // Granting only "Orders" keeps the referenced GET (inlined) and drops the
+        // "Admin" DELETE — the $ref entry no longer silently vanishes.
+        $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/reused'])
+            ->and($filtered['paths']['/reused'])->toHaveKey('get')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('delete')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('$ref');
+    }
+
+    public function test_inlined_path_item_source_is_pruned_after_inlining(): void
+    {
+        // The inlined GET survives; the source components.pathItems.Reused
+        // (holding the ungranted Admin DELETE) is now unreferenced and pruned,
+        // so the ungranted operation can never be re-exposed.
+        $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/reused'])->toHaveKey('get')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('delete')
+            ->and($filtered['components']['pathItems'] ?? [])->toBe([]);
+    }
+
+    public function test_preserves_path_item_referenced_by_a_granted_operation_callback(): void
+    {
+        // A granted operation's callback $refs components.pathItems.CallbackDoc;
+        // that pathItem must survive (valid callback docs), while an unreferenced
+        // reuse source (OrphanReuse) is pruned.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['{$request.body#/cb}' => ['$ref' => '#/components/pathItems/CallbackDoc']]],
+            ]]],
+            'components' => ['pathItems' => [
+                'CallbackDoc' => ['post' => ['responses' => ['200' => ['description' => 'ack']]]],
+                'OrphanReuse' => ['get' => ['responses' => ['200' => ['description' => 'x']]]],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['pathItems']))->toBe(['CallbackDoc']);
+    }
+
+    public function test_preserves_path_item_referenced_through_a_callback_component(): void
+    {
+        // The callback is a $ref to components.callbacks/OnEvent, which itself
+        // refs components.pathItems/CallbackDoc. Reachability must follow the
+        // callback-component hop so CallbackDoc survives (else a dangling ref),
+        // while the unreferenced OrphanReuse is pruned.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['$ref' => '#/components/callbacks/OnEvent']],
+            ]]],
+            'components' => [
+                'callbacks' => ['OnEvent' => ['{$request.body#/cb}' => ['$ref' => '#/components/pathItems/CallbackDoc']]],
+                'pathItems' => [
+                    'CallbackDoc' => ['post' => ['responses' => ['200' => ['description' => 'ack']]]],
+                    'OrphanReuse' => ['get' => ['responses' => ['200' => ['description' => 'x']]]],
+                ],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['pathItems']))->toBe(['CallbackDoc'])
+            ->and($filtered['components']['callbacks'])->toHaveKey('OnEvent');
+    }
+
+    public function test_path_item_ref_operations_are_grantable_by_endpoint(): void
+    {
+        $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect([]), collect(['GET /reused']));
+
+        expect(array_keys($filtered['paths']))->toBe(['/reused'])
+            ->and($filtered['paths']['/reused'])->toHaveKey('get');
+    }
+
+    public function test_resolves_nested_path_item_refs_and_does_not_leak_via_pruning(): void
+    {
+        // A -> ($ref B) + granted GET; B holds an ungranted DELETE. A single-level
+        // resolve would leave a "$ref: B" in the output, which pruning then follows
+        // and keeps B whole — leaking the ungranted DELETE. The chained resolve
+        // must inline only the granted GET and retain no pathItems $ref.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['$ref' => '#/components/pathItems/A']],
+            'components' => [
+                'pathItems' => [
+                    'A' => [
+                        '$ref' => '#/components/pathItems/B',
+                        'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+                    ],
+                    'B' => [
+                        'delete' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]],
+                    ],
+                ],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/x'])
+            ->and($filtered['paths']['/x'])->toHaveKey('get')
+            ->and($filtered['paths']['/x'])->not->toHaveKey('delete')
+            ->and($filtered['paths']['/x'])->not->toHaveKey('$ref')
+            // Neither pathItems component (A/B) may survive: nothing references them.
+            ->and($filtered['components']['pathItems'] ?? [])->toBe([]);
+    }
+
+    public function test_strips_unsupported_external_ref_but_keeps_granted_local_op(): void
+    {
+        // An external/unsupported path-item $ref alongside a granted local op:
+        // the $ref must be stripped (invariant: no path-item $ref survives), the
+        // granted GET inlined.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/mix' => [
+                '$ref' => './external.yaml#/paths/~1foo',
+                'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/mix'])
+            ->and($filtered['paths']['/mix'])->toHaveKey('get')
+            ->and($filtered['paths']['/mix'])->not->toHaveKey('$ref');
+    }
+
+    public function test_drops_path_item_that_is_only_an_unsupported_ref(): void
+    {
+        // A path item that is ONLY an unresolvable external ref has no local
+        // operation to filter, so after stripping the ref the entry is dropped —
+        // even if an endpoint grant nominally targets its key.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/ext' => ['$ref' => 'https://other.example.com/spec.json#/paths/~1x']],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect([]), collect(['GET /ext']));
+
+        expect($filtered['paths'])->toBe([]);
+    }
+
+    public function test_metadata_includes_referenced_path_item_operations(): void
+    {
+        $spec = $this->specWithPathItemRef();
+
+        expect($this->service()->extractTags($spec))->toContain('Orders')->toContain('Admin')
+            ->and(collect($this->service()->extractEndpoints($spec))->pluck('label')->all())
+            ->toContain('GET /reused')->toContain('DELETE /reused');
     }
 
     // ---- B7: injectServers validation -------------------------------------

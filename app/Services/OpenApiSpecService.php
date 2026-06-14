@@ -166,10 +166,12 @@ final class OpenApiSpecService
         }
 
         // Tags from operations under both paths and webhooks (3.1), so a
-        // webhook-only tag is still offered in the admin grant UI.
+        // webhook-only tag is still offered in the admin grant UI. Path-item
+        // $refs (components.pathItems reuse) are resolved so their tags count too.
+        $pathItemComponents = $this->pathItemComponents($spec);
         foreach (['paths', 'webhooks'] as $container) {
             foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
-                foreach ($this->operations($pathItem) as $operation) {
+                foreach ($this->operations($this->resolvePathItem($pathItem, $pathItemComponents)) as $operation) {
                     foreach ($this->asArray($operation['tags'] ?? null) as $name) {
                         if (is_string($name)) {
                             $tags[$name] = true;
@@ -198,12 +200,14 @@ final class OpenApiSpecService
         // Endpoints from both paths and webhooks. A webhook's grant "path" is
         // namespaced (WEBHOOK_GRANT_PREFIX) so it can never collide with a real
         // path keyed identically — matching how filterForUser resolves grants.
+        // Path-item $refs are resolved so reused operations are grantable too.
+        $pathItemComponents = $this->pathItemComponents($spec);
         foreach (['paths', 'webhooks'] as $container) {
             $isWebhook = $container === 'webhooks';
             foreach ($this->asArray($spec[$container] ?? null) as $key => $pathItem) {
                 $key = (string) $key;
                 $grantPath = $this->canonicalEndpointPath($container, $key);
-                foreach ($this->operations($pathItem) as $method => $operation) {
+                foreach ($this->operations($this->resolvePathItem($pathItem, $pathItemComponents)) as $method => $operation) {
                     $upper = strtoupper($method);
                     $summary = $operation['summary'] ?? null;
                     $endpoints[] = [
@@ -247,13 +251,14 @@ final class OpenApiSpecService
         $tagSet = array_flip($allowedTags->values()->all());
         $endpointSet = array_flip($allowedEndpoints->values()->all());
         $usedTags = [];
+        $pathItemComponents = $this->pathItemComponents($spec);
 
         // Rebuild paths AND webhooks (OpenAPI 3.1) with the same rules, so a
         // non-admin never receives ungranted webhook operations either.
-        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags, 'paths');
+        $spec['paths'] = $this->filterPathItemMap($this->asArray($spec['paths'] ?? null), $tagSet, $endpointSet, $usedTags, 'paths', $pathItemComponents);
 
         if (isset($spec['webhooks'])) {
-            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags, 'webhooks');
+            $webhooks = $this->filterPathItemMap($this->asArray($spec['webhooks']), $tagSet, $endpointSet, $usedTags, 'webhooks', $pathItemComponents);
             if ($webhooks === []) {
                 unset($spec['webhooks']);
             } else {
@@ -282,10 +287,12 @@ final class OpenApiSpecService
             unset($spec['security']);
         }
 
-        // Prune orphan components.
-        if (Config::boolean('openapi.prune_components', true)) {
-            $spec = $this->pruneComponents($spec);
-        }
+        // Always prune unreachable components from the filtered spec (security
+        // invariant: never ship the definitions of ungranted operations/schemas,
+        // and never leave a dangling $ref). The closure follows callbacks →
+        // pathItems, so a pathItem reused through a granted operation's callback
+        // (inline or via a components.callbacks ref) is correctly preserved.
+        $spec = $this->pruneComponents($spec);
 
         return $spec;
     }
@@ -334,7 +341,15 @@ final class OpenApiSpecService
     // ---------------------------------------------------------------------
 
     /**
-     * Removes from 'components' everything not reachable from the surviving paths.
+     * Removes from 'components' everything not reachable (transitively) from the
+     * surviving paths/webhooks.
+     *
+     * Pruning is ALWAYS applied to a filtered (non-admin) spec — it is a security
+     * invariant, not a convenience: retaining unreachable components would either
+     * leak the definitions of ungranted operations/schemas or leave dangling
+     * $refs. The reachability closure follows every component ref, including
+     * callbacks → pathItems, so a path item reused through a granted operation's
+     * callback is preserved while an orphaned reuse source is dropped.
      *
      * @param  array<string, mixed>  $spec
      * @return array<string, mixed>
@@ -538,14 +553,20 @@ final class OpenApiSpecService
      * by tag (UNION) or by explicit "METHOD key" endpoint, preserves non-operation
      * keys, and drops entries left with no surviving operation. Records used tags.
      *
+     * A path-item Reference Object ({"$ref": "#/components/pathItems/X"}, 3.1
+     * reuse) is resolved first, then its operations are filtered and inlined —
+     * so a granted operation defined via a shared path item survives, and an
+     * ungranted one can't leak through the still-complete referenced component.
+     *
      * @param  array<array-key, mixed>  $items
      * @param  array<string, int>  $tagSet
      * @param  array<string, int>  $endpointSet
      * @param  array<string, true>  $usedTags  (by-ref accumulator)
      * @param  'paths'|'webhooks'  $container  namespaces webhook endpoint grants
+     * @param  array<array-key, mixed>  $pathItemComponents  components.pathItems (for $ref resolution)
      * @return array<string, mixed>
      */
-    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags, string $container): array
+    private function filterPathItemMap(array $items, array $tagSet, array $endpointSet, array &$usedTags, string $container, array $pathItemComponents): array
     {
         $result = [];
 
@@ -553,7 +574,7 @@ final class OpenApiSpecService
             $key = (string) $rawKey;
             $kept = [];
 
-            foreach ($this->asArray($pathItem) as $field => $value) {
+            foreach ($this->resolvePathItem($pathItem, $pathItemComponents) as $field => $value) {
                 $verb = is_string($field) ? $field : '';
 
                 // Non-operation keys (parameters/summary/$ref/servers): preserved.
@@ -625,6 +646,74 @@ final class OpenApiSpecService
         if ($hosts === [] || ! in_array($host, array_map('strtolower', $hosts), true)) {
             throw new InvalidOpenApiSpecException("OpenAPI upstream host [{$host}] is not allowed.");
         }
+    }
+
+    /**
+     * The components.pathItems map (OpenAPI 3.1 reusable path items), or [].
+     *
+     * @param  array<array-key, mixed>  $spec
+     * @return array<array-key, mixed>
+     */
+    private function pathItemComponents(array $spec): array
+    {
+        return $this->asArray($this->asArray($spec['components'] ?? null)['pathItems'] ?? null);
+    }
+
+    /**
+     * Resolves a path-item Reference Object ({"$ref": "#/components/pathItems/X"},
+     * OpenAPI 3.1 reuse) to the referenced path item, so its operations can be
+     * filtered and enumerated. Sibling keys take precedence over the target.
+     *
+     * The whole `$ref` chain is followed (cycle-safe) and NO path-item `$ref`
+     * survives in the result: a nested, dangling, cyclic, malformed, OR
+     * external/unsupported (non-`#/components/pathItems/`) ref is dropped. This
+     * is essential — if a `#/components/pathItems/…` ref leaked into the filtered
+     * output, pruneComponents() would follow it and keep that entire (unfiltered)
+     * path item; and any other surviving path-item ref could point the response
+     * at content that was never filtered. We inline only resolved operations.
+     *
+     * @param  array<array-key, mixed>  $pathItemComponents
+     * @return array<array-key, mixed>
+     */
+    private function resolvePathItem(mixed $pathItem, array $pathItemComponents): array
+    {
+        $item = $this->asArray($pathItem);
+        $prefix = '#/components/pathItems/';
+        $seen = [];
+
+        // Collect each link of the $ref chain as a precedence layer (closest
+        // first) WITHOUT its own $ref. Invariant: NO path-item $ref survives —
+        // a malformed / external / unsupported / cyclic ref is simply not
+        // followed, so the filtered response can never point at unfiltered (or
+        // pruning-reachable) content.
+        $layers = [];
+        while (true) {
+            $ref = $item['$ref'] ?? null;
+            unset($item['$ref']);
+            $layers[] = $item;
+
+            if (! is_string($ref) || ! str_starts_with($ref, $prefix)) {
+                break; // no further (resolvable path-item) ref
+            }
+
+            $name = substr($ref, strlen($prefix));
+            if (isset($seen[$name])) {
+                break; // cycle
+            }
+            $seen[$name] = true;
+
+            $target = $pathItemComponents[$name] ?? null;
+            if (! is_array($target)) {
+                break; // unresolvable
+            }
+
+            $item = $target;
+        }
+
+        // Merge once (no array union inside the loop): a closer layer wins, so
+        // reverse the list and let array_replace apply later (higher-precedence)
+        // layers last.
+        return array_replace(...array_reverse($layers));
     }
 
     /**

@@ -119,11 +119,13 @@ return [
     | Filter behaviour
     |--------------------------------------------------------------------------
     |
-    | admin_sees_all  -> users with the admin role receive the full spec.
-    | prune_components -> remove orphan components after filtering the paths.
+    | admin_sees_all -> users with the admin role receive the full spec.
+    |
+    | Note: unreachable components are ALWAYS pruned from a filtered (non-admin)
+    | spec — it is a security invariant (never ship the definitions of ungranted
+    | operations/schemas, never leave a dangling $ref), not a toggle.
     |
     */
 
     'admin_sees_all' => (bool) env('OPENAPI_ADMIN_SEES_ALL', true),
-    'prune_components' => (bool) env('OPENAPI_PRUNE_COMPONENTS', true),
 ];
