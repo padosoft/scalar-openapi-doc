@@ -150,7 +150,14 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - **`fa311b5`→`7ac7f92` (1 P2):** in-schema skip list extended with `parameters`/`requestBody` (ref-bearing OpenAPI keys) — a schema annotation can't pull components.parameters/requestBodies + schemas. Pest 185/185, PHPStan max 0, Pint clean.
 - **`7ac7f92`→`f6d2341` (1 P2):** added `schema` to the in-schema opaque-key set (a `schema` annotation inside a Schema Object is non-standard, not a JSON-Schema keyword). The OpenAPI-only key set is now comprehensive for ref-bearing keys: links, callbacks, security, responses, headers, content, encoding, variables, scopes, parameters, requestBody, schema. Pest 186/186, PHPStan max 0, Pint clean.
 - **`f6d2341`→`d3cdc6a` (3 P2):** (BqS) **switched the in-schema deny-list to an ALLOW-LIST** — inside a schema only JSON-Schema keywords (refs/anchors/discriminator + subschema keywords) are walked; all else (xml/externalDocs/vendor/scalars/OpenAPI annotations) is opaque. Exhaustive by design, ends the per-key enumeration. (BqT) anchors gated on `$inSchema` (declarations + bare-`#name` ref classification). (BqU) userinfo included in normalized URI compare. Pest 189/189, PHPStan max 0, Pint clean.
-- **Awaiting:** Codex review of `d3cdc6a`.
+- **`d3cdc6a`→`e1b8cac` (2 P2):** (BqMNL) `resolveUriReference` now carries the base's userinfo so a relative same-document ref resolves correctly against a userinfo-bearing upstream (was pruned/dangling). (BqMNM) the in-schema allow-list now also skips non-string (numeric) keys, so a `{"0": {$ref}}` schema annotation can't leak. Pest 191/191, PHPStan max 0, Pint clean.
+
+### ▶ RESUME HERE (next session) — PR #16 (`task/openapi-service` → `main`)
+- **HEAD pushed:** `e1b8cac`. CI was green on it; `@codex review` posted; all prior threads resolved. **Awaiting Codex's review of `e1b8cac`.**
+- **First action on resume:** re-arm the CI+Codex monitor for the latest pushed SHA (query unresolved threads with `reviewThreads(last:100)` — total threads exceed the 100 `first:` cap). If Codex returns **0 unresolved → MERGE PR #16 into `main`** (`gh pr merge 16 --squash` or per repo convention), mark T4 complete, start T5.
+- **Local docs commits ahead of `main` but in branch:** all committed. Local gates command: `php artisan test` · `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max` · `vendor/bin/pint --test` (use Herd `php`, never XAMPP).
+- **Review-fix loop (rigid on T4):** fetch unresolved thread(s) → fix + add Pest regression test → run 3 local gates → commit (with Co-Authored-By trailer) → push → resolve thread(s) via GraphQL `resolveReviewThread` → post disposition ending `@codex review` → re-arm monitor. T4 has a deep adversarial edge-case tail (OpenAPI 3.1 / JSON-Schema / URI); findings have been genuine leaks/dangles, each fixed.
+- **Policy (user, 2026-06-14):** T4 rigid + proactive; **T5–T9: Codex gates ONLY on security/auth findings, merge on CI+local green otherwise**; **T10 = final deep Copilot review** before release tag.
 
 ## T5 — task/scalar-proxy
 _Not started._
