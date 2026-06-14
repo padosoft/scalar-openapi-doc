@@ -575,14 +575,18 @@ final class OpenApiSpecService
             return true; // external/unknown link ref — leave as-is
         }
 
+        // A link survives only if EVERY local target field present resolves to a
+        // surviving operation. A malformed upstream link may carry BOTH a valid
+        // operationId AND an operationRef pointing at a filtered (hidden) op — if
+        // either resolves to a non-surviving local target, drop the whole link.
         $operationId = $link['operationId'] ?? null;
-        if (is_string($operationId)) {
-            return isset($ids[$operationId]);
+        if (is_string($operationId) && ! isset($ids[$operationId])) {
+            return false;
         }
 
         $operationRef = $link['operationRef'] ?? null;
-        if (is_string($operationRef)) {
-            return $this->operationRefSurvives($operationRef, $locations);
+        if (is_string($operationRef) && ! $this->operationRefSurvives($operationRef, $locations)) {
+            return false;
         }
 
         return true;
