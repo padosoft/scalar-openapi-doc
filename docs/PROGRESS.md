@@ -138,7 +138,8 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 ### Macro PR #16 — later rounds (continued)
 - **`46acdab`→`543e1e9`:** verb-key heuristic too loose — a nested object named `get`/`post` (response/header/schema) treated as an operation; now gated on real `$pathItemContext` (paths/webhooks seeding walks each path item as a path-item position). Proactive sweep: `links`/`callbacks` inside a schema skipped. Pest 166/166.
 - **`543e1e9`→`f7641d8`:** anchor-owner scan walked schema components with `$inSchema=false`, bypassing the new guards — a `$anchor` in a schema `callbacks` annotation could keep a hidden schema. `collectAnchorNames` now takes `$inSchema` (true for `schemas`); swept all walk call sites for consistency. See LESSON `[security/parallel-walks-must-share-context]`. Pest 167/167, PHPStan max 0, Pint clean.
-- **Awaiting:** Codex review of `f7641d8`.
+- **`f7641d8`→`40c7130`:** (1) `$ref` anchor-vs-pointer check judged the RAW string → a percent-encoded pointer (`#%2F…`) was mis-recorded as an anchor and its schema pruned (dangling); now classified on the DECODED `localFragment()`. (2) bare `#anchor` enqueued every owner → an unreferenced schema could survive by reusing a visible anchor name; now resolves only when EXACTLY ONE component declares it (ambiguous → unresolved, full `$id` scoping out of scope). Pest 169/169, PHPStan max 0, Pint clean.
+- **Awaiting:** Codex review of `40c7130`.
 
 ## T5 — task/scalar-proxy
 _Not started._
