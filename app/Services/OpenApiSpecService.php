@@ -636,7 +636,10 @@ final class OpenApiSpecService
         // Compare INCLUDING the query: a query distinguishes representations, so a
         // ref carrying a different (or any) query targets a different document and
         // must not be treated as same-document. Only the fragment is dropped.
-        $upstreamTarget = $this->stripFragment($upstream);
+        $upstreamTarget = $this->normalizeAbsolute($this->stripFragment($upstream));
+        if ($upstreamTarget === null) {
+            return false;
+        }
         $resolved = $this->resolveUriReference($base, $upstreamTarget);
 
         return $resolved !== null && $resolved === $upstreamTarget;
@@ -676,7 +679,7 @@ final class OpenApiSpecService
             return $baseUrl;
         }
         if (preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $ref) === 1) {
-            return $ref; // absolute URI (with its query)
+            return $this->normalizeAbsolute($ref); // absolute URI — normalise path
         }
 
         $baseParts = parse_url($baseUrl);
@@ -685,7 +688,7 @@ final class OpenApiSpecService
         }
         $scheme = (string) $baseParts['scheme'];
         if (str_starts_with($ref, '//')) {
-            return $scheme.':'.$ref; // protocol-relative
+            return $this->normalizeAbsolute($scheme.':'.$ref); // protocol-relative
         }
 
         $origin = $scheme.'://'.$baseParts['host'].(isset($baseParts['port']) ? ':'.$baseParts['port'] : '');
@@ -708,6 +711,25 @@ final class OpenApiSpecService
             $path = $this->normalizePath($dir.$refPath);
             $query = $refQuery;
         }
+
+        return $origin.$path.$query;
+    }
+
+    /**
+     * Normalises an absolute URL: collapses "." / ".." in the path and keeps the
+     * query, so e.g. "https://h/v1/../openapi.json" == "https://h/openapi.json".
+     * Returns null if not an absolute URL with scheme + host.
+     */
+    private function normalizeAbsolute(string $url): ?string
+    {
+        $parts = parse_url($url);
+        if (! is_array($parts) || ! isset($parts['scheme'], $parts['host'])) {
+            return null;
+        }
+
+        $origin = $parts['scheme'].'://'.$parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
+        $path = $this->normalizePath(is_string($parts['path'] ?? null) ? $parts['path'] : '/');
+        $query = isset($parts['query']) ? '?'.$parts['query'] : '';
 
         return $origin.$path.$query;
     }

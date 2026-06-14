@@ -855,6 +855,31 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered)->not->toHaveKey('components');
     }
 
+    public function test_normalizes_absolute_operationref_to_current_document(): void
+    {
+        // An absolute operationRef that normalizes to the upstream document
+        // (".../v1/../openapi.json") is same-document; a link to its filtered
+        // /admin op must be dropped.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toAdmin' => ['operationRef' => 'https://specs.example.com/v1/../openapi.json#/paths/~1admin/get'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_same_name_sibling_in_other_directory_is_external(): void
     {
         // Upstream is .../specs/v1/openapi.json; a "../common/openapi.json" ref
