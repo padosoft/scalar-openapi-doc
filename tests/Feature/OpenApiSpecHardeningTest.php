@@ -283,6 +283,20 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['paths']['/reused'])->not->toHaveKey('$ref');
     }
 
+    public function test_inlined_path_items_are_scrubbed_even_when_pruning_disabled(): void
+    {
+        // With prune_components OFF the inlined GET survives, but the source
+        // components.pathItems.Reused (holding the ungranted Admin DELETE) must
+        // still be removed so the toggle can't re-expose ungranted operations.
+        config(['openapi.prune_components' => false]);
+
+        $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/reused'])->toHaveKey('get')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('delete')
+            ->and($filtered['components']['pathItems'] ?? [])->toBe([]);
+    }
+
     public function test_path_item_ref_operations_are_grantable_by_endpoint(): void
     {
         $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect([]), collect(['GET /reused']));

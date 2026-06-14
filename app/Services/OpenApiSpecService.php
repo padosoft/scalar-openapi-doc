@@ -279,6 +279,18 @@ final class OpenApiSpecService
             ));
         }
 
+        // Reusable path items were inlined into paths/webhooks (no path-item
+        // $ref survives), so components.pathItems still holds the UNFILTERED
+        // originals. Drop the whole bucket regardless of the prune_components
+        // toggle — otherwise, with pruning disabled, a non-admin would receive
+        // the ungranted operations of an inlined component verbatim.
+        if (isset($spec['components']) && is_array($spec['components'])) {
+            unset($spec['components']['pathItems']);
+            if ($spec['components'] === []) {
+                unset($spec['components']);
+            }
+        }
+
         // Root `security` applies only to operations that don't override it. If
         // no surviving operation inherits it, the requirement is vacuous — and
         // would dangle (referencing a securityScheme that pruning then removes),
