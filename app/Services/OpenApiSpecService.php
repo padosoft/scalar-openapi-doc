@@ -1312,7 +1312,7 @@ final class OpenApiSpecService
         // to its owning "type/name". An external URI ref (with a scheme/authority,
         // e.g. "https://other#/components/schemas/X") is ignored — it targets
         // another document, so our local component must not be kept alive by it.
-        $addComponent = function (mixed $ref, bool $allowOperationBearing = false) use (&$refs): void {
+        $addComponent = function (mixed $ref, ?string $allowOperationBearing = null) use (&$refs): void {
             if (! is_string($ref)) {
                 return;
             }
@@ -1321,11 +1321,15 @@ final class OpenApiSpecService
                 return;
             }
             // Operation-bearing components (pathItems/callbacks) are reachable ONLY
-            // from structural positions (paths inlined by resolvePathItem, or
-            // path-item/callback positions) — never via a generic $ref from a
-            // schema/parameter/response position, which would keep an unfiltered
-            // path item/callback (with ungranted operations) in the response.
-            if (! $allowOperationBearing && in_array(explode('/', $owning, 2)[0], ['pathItems', 'callbacks'], true)) {
+            // from structural positions, and each position admits a SINGLE type: a
+            // Path Item `$ref` resolves only to another Path Item, a Callback `$ref`
+            // only to a Callback. `$allowOperationBearing` names the one type that
+            // is legal here (null = none). A generic $ref from a schema/parameter/
+            // response position — or a path-item $ref to a callback (or vice versa)
+            // — must NOT keep an unfiltered path item/callback (with ungranted
+            // operations) reachable in the filtered spec.
+            $type = explode('/', $owning, 2)[0];
+            if (in_array($type, ['pathItems', 'callbacks'], true) && $type !== $allowOperationBearing) {
                 return;
             }
             $refs[] = $owning;
@@ -1360,9 +1364,9 @@ final class OpenApiSpecService
                             // Anchor fragment ("#name") — resolved via anchor decls.
                             $refs[] = self::ANCHOR_REF_PREFIX.substr($child, 1);
                         } else {
-                            // $pathItemContext: a path-item top-level $ref may target
-                            // an operation-bearing component (pathItems/callbacks).
-                            $addComponent($child, $pathItemContext);
+                            // $pathItemContext: a path-item top-level $ref may reuse
+                            // another Path Item ONLY (never a Callback component).
+                            $addComponent($child, $pathItemContext ? 'pathItems' : null);
                         }
 
                         continue;
@@ -1406,7 +1410,7 @@ final class OpenApiSpecService
                                 continue;
                             }
                             if (isset($callback['$ref'])) {
-                                $addComponent($callback['$ref'], true); // callback position
+                                $addComponent($callback['$ref'], 'callbacks'); // callback ref → callbacks only
 
                                 continue;
                             }

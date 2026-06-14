@@ -1824,4 +1824,42 @@ class OpenApiSpecHardeningTest extends TestCase
             ->toBe(['$ref' => '#/components/schemas/Internal'])
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
+
+    public function test_path_item_ref_to_a_callback_does_not_keep_the_callback(): void
+    {
+        // A Path Item $ref must resolve only to another Path Item. A callback path
+        // item whose top-level $ref points at #/components/callbacks/Hidden is
+        // malformed; the operation-bearing allowance for path-item positions must
+        // NOT also admit callbacks, or the hidden callback (and its ungranted
+        // operation + secret schema) would survive in the non-admin filtered spec.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => [
+                    '{$request.body#/u}' => ['$ref' => '#/components/callbacks/Hidden'],
+                ]],
+            ]]],
+            'components' => [
+                'callbacks' => ['Hidden' => [
+                    '{$request.body#/u}' => ['post' => [
+                        'operationId' => 'hiddenOp',
+                        'requestBody' => ['content' => ['application/json' => [
+                            'schema' => ['$ref' => '#/components/schemas/Secret'],
+                        ]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ]],
+                ]],
+                'schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['callbacks'] ?? [])->not->toHaveKey('Hidden')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
 }
