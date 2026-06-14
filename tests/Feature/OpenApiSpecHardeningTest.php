@@ -692,6 +692,70 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toContain('Node')->not->toContain('Unused');
     }
 
+    public function test_external_component_ref_does_not_keep_local_component(): void
+    {
+        // An external URI ref with a local-looking fragment targets ANOTHER
+        // document — it must not keep our same-named local component reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => 'https://schemas.example.com/common.json#/components/schemas/Internal'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Internal' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
+    public function test_resolves_relative_same_document_path_item_ref(): void
+    {
+        // A filename-prefixed same-document path-item ref must resolve and inline.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/reused' => ['$ref' => './openapi.json#/components/pathItems/Reused']],
+            'components' => ['pathItems' => ['Reused' => [
+                'get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]],
+            ]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['paths']))->toBe(['/reused'])
+            ->and($filtered['paths']['/reused'])->toHaveKey('get')
+            ->and($filtered['paths']['/reused'])->not->toHaveKey('$ref');
+    }
+
+    public function test_drops_relative_component_link_ref_to_filtered_target(): void
+    {
+        // A relative component-link ref (./openapi.json#/components/links/X) whose
+        // target link points at a filtered operation must be dropped, not kept.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'go' => ['$ref' => './openapi.json#/components/links/ToSecret'],
+                    ]]],
+                ]],
+                '/secret' => ['get' => ['tags' => ['Admin'], 'operationId' => 'getSecret', 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+            'components' => ['links' => ['ToSecret' => ['operationId' => 'getSecret']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_keeps_component_for_relative_same_document_ref(): void
     {
         // A filename-prefixed same-document $ref ("./openapi.json#/components/...")

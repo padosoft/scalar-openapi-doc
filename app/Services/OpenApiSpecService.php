@@ -369,7 +369,7 @@ final class OpenApiSpecService
                 $survivingLinkNames[(string) $name] = true;
             }
         }
-        $linkRefPrefix = '#/components/links/';
+        $linkFragmentPrefix = '/components/links/';
         do {
             $changed = false;
             foreach ($componentLinks as $name => $link) {
@@ -381,10 +381,12 @@ final class OpenApiSpecService
                 if (! is_string($ref)) {
                     continue;
                 }
-                // External link $ref — keep conservatively. A local alias survives
-                // once its target link is known to survive.
-                $survives = ! str_starts_with($ref, $linkRefPrefix)
-                    || isset($survivingLinkNames[substr($ref, strlen($linkRefPrefix))]);
+                // External link $ref — keep conservatively. A same-document alias
+                // survives once its target link is known to survive.
+                $fragment = $this->localFragment($ref);
+                $isLocalAlias = $fragment !== null && str_starts_with($fragment, $linkFragmentPrefix);
+                $survives = ! $isLocalAlias
+                    || isset($survivingLinkNames[substr((string) $fragment, strlen($linkFragmentPrefix))]);
                 if ($survives) {
                     $survivingLinkNames[$key] = true;
                     $changed = true;
@@ -564,9 +566,10 @@ final class OpenApiSpecService
 
         $ref = $link['$ref'] ?? null;
         if (is_string($ref)) {
-            $prefix = '#/components/links/';
-            if (str_starts_with($ref, $prefix)) {
-                return isset($survivingLinkNames[substr($ref, strlen($prefix))]);
+            $fragmentPrefix = '/components/links/';
+            $fragment = $this->localFragment($ref);
+            if ($fragment !== null && str_starts_with($fragment, $fragmentPrefix)) {
+                return isset($survivingLinkNames[substr($fragment, strlen($fragmentPrefix))]);
             }
 
             return true; // external/unknown link ref — leave as-is
@@ -586,23 +589,46 @@ final class OpenApiSpecService
     }
 
     /**
+     * The same-document JSON-pointer fragment of a ref, or null if the ref is
+     * external (has a URI scheme or "//" authority) or has no fragment.
+     *
+     * A pure fragment ("#/…") and a relative reference ("./file#/…", "x#/…") are
+     * treated as same-document (the served spec is one bundled document); an
+     * absolute URI ("https://other#/…") targets a different document.
+     */
+    private function localFragment(string $ref): ?string
+    {
+        $hash = strpos($ref, '#');
+        if ($hash === false) {
+            return null;
+        }
+
+        $base = substr($ref, 0, $hash);
+        if ($base !== '' && (str_starts_with($base, '//') || preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $base) === 1)) {
+            return null; // external URI (scheme/authority) — not same-document
+        }
+
+        return substr($ref, $hash + 1);
+    }
+
+    /**
      * Whether an `operationRef` targets a surviving operation. Resolution is done
-     * on the URI FRAGMENT (everything after '#'), so a relative same-document ref
+     * on the same-document FRAGMENT, so a relative ref
      * (e.g. "./openapi.json#/paths/~1admin/get") is matched the same as the bare
      * "#/paths/…" form — preventing a hidden path/key from leaking through a
-     * filename-prefixed ref. A fragment that points at a local operation but does
-     * not resolve to a surviving one is dropped; a fragment that isn't a
-     * recognizable local operation pointer is treated as external (kept).
+     * filename-prefixed ref. A same-document fragment that points at a local
+     * operation but does not resolve to a surviving one is dropped; an external
+     * ref, or a fragment that isn't a recognizable local operation pointer, is
+     * treated as external (kept).
      *
      * @param  array<string, true>  $locations
      */
     private function operationRefSurvives(string $operationRef, array $locations): bool
     {
-        $hash = strpos($operationRef, '#');
-        if ($hash === false) {
-            return true; // no fragment — external, not a local-operation leak
+        $fragment = $this->localFragment($operationRef);
+        if ($fragment === null) {
+            return true; // external/fragment-less — not a local-operation leak
         }
-        $fragment = substr($operationRef, $hash + 1);
 
         foreach (['paths', 'webhooks'] as $container) {
             $prefix = '/'.$container.'/';
@@ -1086,20 +1112,17 @@ final class OpenApiSpecService
             'headers', 'content', 'encoding', 'variables', 'responses',
         ];
 
-        // Resolves on the URI FRAGMENT, so a filename-prefixed same-document ref
-        // (e.g. "./openapi.json#/components/schemas/Pet") is normalised like the
-        // bare "#/components/..." form to its owning "type/name".
-        $addComponent = static function (mixed $ref) use (&$refs): void {
+        // Resolves a SAME-DOCUMENT ref (pure "#/..." or a relative "./file#/...")
+        // to its owning "type/name". An external URI ref (with a scheme/authority,
+        // e.g. "https://other#/components/schemas/X") is ignored — it targets
+        // another document, so our local component must not be kept alive by it.
+        $addComponent = function (mixed $ref) use (&$refs): void {
             if (! is_string($ref)) {
                 return;
             }
-            $hash = strpos($ref, '#');
-            if ($hash === false) {
-                return;
-            }
-            $fragment = substr($ref, $hash + 1);
+            $fragment = $this->localFragment($ref);
             $localPrefix = '/components/';
-            if (! str_starts_with($fragment, $localPrefix)) {
+            if ($fragment === null || ! str_starts_with($fragment, $localPrefix)) {
                 return;
             }
             $segments = explode('/', substr($fragment, strlen($localPrefix)));
@@ -1531,25 +1554,27 @@ final class OpenApiSpecService
     private function resolvePathItem(mixed $pathItem, array $pathItemComponents): array
     {
         $item = $this->asArray($pathItem);
-        $prefix = '#/components/pathItems/';
+        $fragmentPrefix = '/components/pathItems/';
         $seen = [];
 
         // Collect each link of the $ref chain as a precedence layer (closest
         // first) WITHOUT its own $ref. Invariant: NO path-item $ref survives —
         // a malformed / external / unsupported / cyclic ref is simply not
         // followed, so the filtered response can never point at unfiltered (or
-        // pruning-reachable) content.
+        // pruning-reachable) content. Same-document refs (pure or relative) are
+        // resolved; external/unsupported ones are dropped.
         $layers = [];
         while (true) {
             $ref = $item['$ref'] ?? null;
             unset($item['$ref']);
             $layers[] = $item;
 
-            if (! is_string($ref) || ! str_starts_with($ref, $prefix)) {
-                break; // no further (resolvable path-item) ref
+            $fragment = is_string($ref) ? $this->localFragment($ref) : null;
+            if ($fragment === null || ! str_starts_with($fragment, $fragmentPrefix)) {
+                break; // no further (resolvable same-document path-item) ref
             }
 
-            $name = substr($ref, strlen($prefix));
+            $name = substr($fragment, strlen($fragmentPrefix));
             if (isset($seen[$name])) {
                 break; // cycle
             }
