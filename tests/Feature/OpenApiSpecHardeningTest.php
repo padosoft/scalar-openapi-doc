@@ -1952,6 +1952,38 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_inline_callback_drops_an_ungranted_audience_operation(): void
+    {
+        // A granted Orders operation has an INLINE callback whose path item carries
+        // an Admin-tagged operation. That operation (and the schema only it uses)
+        // must not ship to an Orders-only user; an untagged callback op would stay.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'operationId' => 'createOrder',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['{$request.body#/cb}' => [
+                    'post' => ['responses' => ['201' => ['description' => 'ack']]], // untagged: kept
+                    'delete' => [
+                        'tags' => ['Admin'],
+                        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret']]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ],
+                ]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $cb = $filtered['paths']['/order']['post']['callbacks']['onEvent']['{$request.body#/cb}'];
+        expect($cb)->toHaveKey('post')        // untagged callback op rides with the parent
+            ->and($cb)->not->toHaveKey('delete') // Admin-tagged callback op dropped
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas'); // its schema pruned
+    }
+
     public function test_reusable_callback_component_drops_ungranted_operations(): void
     {
         // A granted operation references a reusable components.callbacks entry whose

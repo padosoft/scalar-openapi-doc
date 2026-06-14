@@ -1809,16 +1809,45 @@ final class OpenApiSpecService
                 $this->asArray($this->asArray($value)['tags'] ?? null),
                 static fn (mixed $t): bool => is_string($t),
             ));
-            if (array_intersect_key($tagSet, array_flip($operationTags)) === []) {
-                continue; // not granted by tag — drop this reusable operation
+            // A callback/reusable operation has no path, so no endpoint grant can
+            // apply. Drop it ONLY when it is tagged for an audience the user is not
+            // granted; an UNTAGGED operation rides with the granted parent (it is
+            // part of that operation's contract) and is kept, as is one carrying a
+            // granted tag. Inline callbacks of a kept operation are filtered too.
+            if ($operationTags !== [] && array_intersect_key($tagSet, array_flip($operationTags)) === []) {
+                continue;
             }
-            $kept[$field] = $value;
+            $kept[$field] = $this->filterOperationCallbacks($value, $tagSet, $usedTags);
             foreach ($operationTags as $t) {
                 $usedTags[$t] = true;
             }
         }
 
         return $kept === [] ? (object) [] : $kept;
+    }
+
+    /**
+     * Recursively tag-filters the operations inside an Operation Object's inline
+     * `callbacks` map, so an Admin-tagged callback operation (and the schemas it
+     * references) cannot ship inside a granted operation. Untagged callback
+     * operations — the common case — are preserved as part of the contract.
+     *
+     * @param  array<string, int>  $tagSet
+     * @param  array<string, true>  $usedTags
+     */
+    private function filterOperationCallbacks(mixed $operation, array $tagSet, array &$usedTags): mixed
+    {
+        if (! is_array($operation) || ! is_array($operation['callbacks'] ?? null)) {
+            return $operation;
+        }
+
+        $callbacks = [];
+        foreach ($operation['callbacks'] as $name => $callback) {
+            $callbacks[$name] = $this->filterCallbackOperationsByTag($callback, $tagSet, $usedTags);
+        }
+        $operation['callbacks'] = $callbacks;
+
+        return $operation;
     }
 
     /**
@@ -1893,7 +1922,9 @@ final class OpenApiSpecService
                     continue; // drop this operation
                 }
 
-                $kept[$field] = $value;
+                // Keep the operation, but tag-filter its inline callbacks so an
+                // other-audience (e.g. Admin) callback operation can't ride along.
+                $kept[$field] = $this->filterOperationCallbacks($value, $tagSet, $usedTags);
                 foreach ($operationTags as $name) {
                     $usedTags[$name] = true;
                 }
