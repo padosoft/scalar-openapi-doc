@@ -627,10 +627,13 @@ final class OpenApiSpecService
             return false;
         }
 
-        $upstreamDoc = $this->stripQueryFragment($upstream);
-        $resolved = $this->resolveUriReference($base, $upstreamDoc);
+        // Compare INCLUDING the query: a query distinguishes representations, so a
+        // ref carrying a different (or any) query targets a different document and
+        // must not be treated as same-document. Only the fragment is dropped.
+        $upstreamTarget = $this->stripFragment($upstream);
+        $resolved = $this->resolveUriReference($base, $upstreamTarget);
 
-        return $resolved !== null && $resolved === $upstreamDoc;
+        return $resolved !== null && $resolved === $upstreamTarget;
     }
 
     /**
@@ -650,23 +653,24 @@ final class OpenApiSpecService
         return count($segments) >= 2 ? $segments[0].'/'.$segments[1] : null;
     }
 
-    private function stripQueryFragment(string $url): string
+    private function stripFragment(string $url): string
     {
-        return explode('#', explode('?', $url)[0])[0];
+        return explode('#', $url)[0]; // keep query, drop fragment
     }
 
     /**
-     * Minimal RFC-3986-style resolution of a URI-reference against a base URL,
-     * returning the normalised absolute target (or null if unresolvable).
+     * Minimal RFC-3986-style resolution of a URI-reference (which may carry a
+     * query) against a base URL, returning the normalised absolute target
+     * INCLUDING its query (or null if unresolvable). The fragment is assumed
+     * already removed by the caller.
      */
     private function resolveUriReference(string $ref, string $baseUrl): ?string
     {
-        $ref = $this->stripQueryFragment($ref);
         if ($ref === '') {
             return $baseUrl;
         }
         if (preg_match('~^[a-zA-Z][a-zA-Z0-9+.\-]*:~', $ref) === 1) {
-            return $ref; // absolute URI
+            return $ref; // absolute URI (with its query)
         }
 
         $baseParts = parse_url($baseUrl);
@@ -681,15 +685,25 @@ final class OpenApiSpecService
         $origin = $scheme.'://'.$baseParts['host'].(isset($baseParts['port']) ? ':'.$baseParts['port'] : '');
         $basePath = is_string($baseParts['path'] ?? null) ? $baseParts['path'] : '/';
 
-        if (str_starts_with($ref, '/')) {
-            $path = $ref; // absolute path
+        $q = strpos($ref, '?');
+        $refPath = $q === false ? $ref : substr($ref, 0, $q);
+        $refQuery = $q === false ? '' : substr($ref, $q); // includes leading '?'
+
+        if ($refPath === '') {
+            // Same path, different query (e.g. "?variant=x").
+            $path = $basePath;
+            $query = $refQuery !== '' ? $refQuery : (isset($baseParts['query']) ? '?'.$baseParts['query'] : '');
+        } elseif (str_starts_with($refPath, '/')) {
+            $path = $this->normalizePath($refPath);
+            $query = $refQuery;
         } else {
             $slash = strrpos($basePath, '/');
             $dir = $slash === false ? '/' : substr($basePath, 0, $slash + 1);
-            $path = $dir.$ref;
+            $path = $this->normalizePath($dir.$refPath);
+            $query = $refQuery;
         }
 
-        return $origin.$this->normalizePath($path);
+        return $origin.$path.$query;
     }
 
     /**

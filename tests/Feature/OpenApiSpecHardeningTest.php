@@ -783,6 +783,29 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components']['pathItems'] ?? [])->toBe([]);
     }
 
+    public function test_ref_with_query_is_treated_as_external(): void
+    {
+        // A query distinguishes document representations, so a ref carrying a
+        // query ("?variant=internal#/...") targets a different document and must
+        // not keep our same-pointer local component.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '?variant=internal#/components/schemas/Secret'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
     public function test_same_name_sibling_in_other_directory_is_external(): void
     {
         // Upstream is .../specs/v1/openapi.json; a "../common/openapi.json" ref
