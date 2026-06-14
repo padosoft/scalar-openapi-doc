@@ -485,6 +485,65 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
     }
 
+    public function test_example_data_refs_do_not_keep_components_alive(): void
+    {
+        // A literal "$ref" inside an `example` value is data, not a reference —
+        // it must NOT keep an otherwise-unreachable schema alive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Real'],
+                    'example' => ['$ref' => '#/components/schemas/Secret'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Real' => ['type' => 'object'], 'Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Real']);
+    }
+
+    public function test_real_example_object_ref_is_preserved(): void
+    {
+        // A genuine {$ref: #/components/examples/X} in an `examples` MAP is a real
+        // reference and must survive; an unreferenced example is pruned.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'examples' => ['sample' => ['$ref' => '#/components/examples/Sample']],
+                ]]]],
+            ]]],
+            'components' => ['examples' => ['Sample' => ['value' => ['id' => 1]], 'Unused' => ['value' => ['x' => 2]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['examples']))->toBe(['Sample']);
+    }
+
+    public function test_drops_non_array_component_members_when_filtering(): void
+    {
+        // A scalar component member (e.g. an x-* extension) is unreachable and
+        // must not survive into a non-admin filtered spec.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [],
+            'components' => ['x-internal-note' => 'secret note', 'schemas' => ['Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect([]), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
     public function test_keeps_root_security_when_a_granted_callback_operation_inherits_it(): void
     {
         // The only surviving top-level op declares its own security, but its

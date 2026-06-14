@@ -573,12 +573,12 @@ final class OpenApiSpecService
             }
         }
 
-        // Rebuild components keeping only reachable entries.
+        // Rebuild components keeping only reachable entries. A non-array member
+        // (e.g. an `x-*` extension scalar) is never reachable via $ref, so it is
+        // dropped from the filtered spec rather than copied through.
         $pruned = [];
         foreach ($components as $type => $entries) {
             if (! is_array($entries)) {
-                $pruned[$type] = $entries;
-
                 continue;
             }
             $kept = [];
@@ -610,6 +610,10 @@ final class OpenApiSpecService
      * "schemas/Pet" — otherwise the owning component is never marked reachable
      * and gets pruned, leaving a dangling $ref.
      *
+     * EXAMPLE DATA is skipped: a literal `"$ref"` inside an `example` value or an
+     * Example Object's `value` is user data, not an OpenAPI reference, so walking
+     * it would wrongly keep an otherwise-unreachable component alive.
+     *
      * @return list<string>
      */
     private function collectComponentRefs(mixed $node): array
@@ -617,19 +621,47 @@ final class OpenApiSpecService
         $refs = [];
         $prefix = '#/components/';
 
-        $walk = static function (mixed $value) use (&$walk, &$refs, $prefix): void {
+        $collect = static function (mixed $ref) use (&$refs, $prefix): void {
+            if (is_string($ref) && str_starts_with($ref, $prefix)) {
+                $segments = explode('/', substr($ref, strlen($prefix)));
+                if (count($segments) >= 2) {
+                    $refs[] = $segments[0].'/'.$segments[1]; // owning "type/name"
+                }
+            }
+        };
+
+        $walk = static function (mixed $value) use (&$walk, &$collect): void {
             if (! is_array($value)) {
                 return;
             }
             foreach ($value as $key => $child) {
-                if ($key === '$ref' && is_string($child) && str_starts_with($child, $prefix)) {
-                    $segments = explode('/', substr($child, strlen($prefix)));
-                    if (count($segments) >= 2) {
-                        $refs[] = $segments[0].'/'.$segments[1]; // owning "type/name"
+                if ($key === '$ref') {
+                    $collect($child);
+
+                    continue;
+                }
+
+                // `example` (singular) is free-form data — never a ref source.
+                if ($key === 'example') {
+                    continue;
+                }
+
+                // `examples` is either a JSON-Schema array of raw values (data)
+                // or a map of Example Objects. In the map case an entry may be a
+                // real {$ref: #/components/examples/X}; collect that but never
+                // recurse into an example's `value` (data).
+                if ($key === 'examples' && is_array($child)) {
+                    if (! array_is_list($child)) {
+                        foreach ($child as $example) {
+                            if (is_array($example)) {
+                                $collect($example['$ref'] ?? null);
+                            }
+                        }
                     }
 
                     continue;
                 }
+
                 $walk($child);
             }
         };
