@@ -1022,7 +1022,8 @@ final class OpenApiSpecService
             }
             foreach ($value as $key => $child) {
                 if (! $keysAreNames) {
-                    if ($key === '$ref') {
+                    // $ref plus JSON Schema 2020-12 / draft-2019 dynamic refs.
+                    if ($key === '$ref' || $key === '$dynamicRef' || $key === '$recursiveRef') {
                         $addComponent($child);
 
                         continue;

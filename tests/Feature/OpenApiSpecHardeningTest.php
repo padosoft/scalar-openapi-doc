@@ -461,6 +461,27 @@ class OpenApiSpecHardeningTest extends TestCase
             ->toContain('GET /reused')->toContain('DELETE /reused');
     }
 
+    public function test_keeps_dynamic_ref_target_schema(): void
+    {
+        // OpenAPI 3.1 / JSON Schema 2020-12 $dynamicRef to a component must keep
+        // that component reachable, like $ref.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$dynamicRef' => '#/components/schemas/Node'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Node' => ['type' => 'object'], 'Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Node']);
+    }
+
     public function test_keeps_owning_component_for_a_nested_pointer_ref(): void
     {
         // A $ref into a sub-schema (#/components/schemas/Pet/properties/id) must
