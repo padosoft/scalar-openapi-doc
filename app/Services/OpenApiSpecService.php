@@ -537,53 +537,23 @@ final class OpenApiSpecService
         // whether root security survives depends on the reachable set computed
         // below, so seeding it up front could keep schemes no visible op uses.
         $reachable = [];                                   // "schemas/Foo" => true
-        $queue = [
+        $this->drainReachability([
             ...$this->collectReachableRefs($spec['paths'] ?? []),
             ...$this->collectReachableRefs($spec['webhooks'] ?? []),
-        ];
-
-        while ($queue !== []) {
-            $ref = array_pop($queue);
-            if (isset($reachable[$ref])) {
-                continue;
-            }
-            $reachable[$ref] = true;
-
-            [$type, $name] = array_pad(explode('/', $ref, 2), 2, null);
-            if (! is_string($type) || ! is_string($name)) {
-                continue;
-            }
-            $bucket = $components[$type] ?? null;
-            $component = is_array($bucket) ? ($bucket[$name] ?? null) : null;
-            if ($component === null) {
-                continue;
-            }
-
-            // An Example Object's `value` is free-form DATA — never follow refs
-            // inside it (a literal "$ref" there is not an OpenAPI reference).
-            if ($type === 'examples') {
-                continue;
-            }
-
-            // Follow both $ref children AND security-scheme names declared inside
-            // this reachable component (e.g. a callback/pathItem operation's
-            // `security`), so callback-only schemes are kept, not pruned.
-            foreach ($this->collectReachableRefs($component) as $child) {
-                if (! isset($reachable[$child])) {
-                    $queue[] = $child;
-                }
-            }
-        }
+        ], $reachable, $components);
 
         // Decide root `security` now that the reachable set is known: keep it only
         // if a surviving operation inherits it (inline in paths/webhooks, or in a
-        // REACHABLE components.pathItems/callbacks). Its schemes are then reachable
-        // too; otherwise the vacuous requirement is dropped.
+        // REACHABLE components.pathItems/callbacks). If kept, drain its schemes too
+        // (a scheme may itself be a Reference Object); otherwise drop the vacuous
+        // requirement.
         if (isset($spec['security'])) {
             if ($this->inheritsRootSecurity($spec, $reachable)) {
+                $rootQueue = [];
                 foreach ($this->securityRequirementSchemes($spec['security']) as $schemeName) {
-                    $reachable['securitySchemes/'.$schemeName] = true;
+                    $rootQueue[] = 'securitySchemes/'.$schemeName;
                 }
+                $this->drainReachability($rootQueue, $reachable, $components);
             } else {
                 unset($spec['security']);
             }
@@ -615,6 +585,51 @@ final class OpenApiSpecService
         }
 
         return $spec;
+    }
+
+    /**
+     * Marks every component transitively reachable from $queue into $reachable
+     * (keyed "type/name"), following each reachable component's child refs.
+     *
+     * An Example component is special-cased: its `value` payload is data (never
+     * traversed), but if the component is itself a Reference Object its `$ref` is
+     * still followed (so an example alias keeps its target alive).
+     *
+     * @param  list<string>  $queue
+     * @param  array<string, true>  $reachable  (by-ref accumulator)
+     * @param  array<array-key, mixed>  $components
+     */
+    private function drainReachability(array $queue, array &$reachable, array $components): void
+    {
+        while ($queue !== []) {
+            $ref = array_pop($queue);
+            if (isset($reachable[$ref])) {
+                continue;
+            }
+            $reachable[$ref] = true;
+
+            [$type, $name] = array_pad(explode('/', $ref, 2), 2, null);
+            if (! is_string($type) || ! is_string($name)) {
+                continue;
+            }
+            $bucket = $components[$type] ?? null;
+            $component = is_array($bucket) ? ($bucket[$name] ?? null) : null;
+            if ($component === null) {
+                continue;
+            }
+
+            // Example component: follow only a top-level $ref (Reference Object),
+            // never its `value` data. Other components are walked in full.
+            $children = $type === 'examples'
+                ? $this->collectReachableRefs(['$ref' => (is_array($component) ? ($component['$ref'] ?? null) : null)])
+                : $this->collectReachableRefs($component);
+
+            foreach ($children as $child) {
+                if (! isset($reachable[$child])) {
+                    $queue[] = $child;
+                }
+            }
+        }
     }
 
     /**

@@ -583,6 +583,57 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components']['schemas'] ?? [])->toBe([]);
     }
 
+    public function test_follows_ref_from_a_root_security_scheme_alias(): void
+    {
+        // Root security names ApiKeyAuth, which is a Reference Object to BearerAuth.
+        // A surviving op inherits root, so both schemes must survive (no dangling).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'security' => [['ApiKeyAuth' => []]],
+            'paths' => ['/order' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]],
+            'components' => ['securitySchemes' => [
+                'ApiKeyAuth' => ['$ref' => '#/components/securitySchemes/BearerAuth'],
+                'BearerAuth' => ['type' => 'http', 'scheme' => 'bearer'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->toHaveKey('security')
+            ->and(array_keys($filtered['components']['securitySchemes']))
+            ->toContain('ApiKeyAuth')->toContain('BearerAuth');
+    }
+
+    public function test_follows_ref_from_an_example_object_alias(): void
+    {
+        // An Example component that is a Reference Object (Alias -> Real) must keep
+        // its target reachable, even though example `value` payloads are skipped.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'examples' => ['sample' => ['$ref' => '#/components/examples/Alias']],
+                ]]]],
+            ]]],
+            'components' => ['examples' => [
+                'Alias' => ['$ref' => '#/components/examples/Real'],
+                'Real' => ['value' => ['id' => 1]],
+                'Unused' => ['value' => ['x' => 2]],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['examples']))
+            ->toContain('Alias')->toContain('Real')->not->toContain('Unused');
+    }
+
     public function test_unreachable_path_item_does_not_keep_root_security(): void
     {
         // The only surviving op declares its own security; an UNREFERENCED
