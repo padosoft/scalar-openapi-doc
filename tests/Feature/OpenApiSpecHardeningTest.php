@@ -1887,6 +1887,34 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_security_keyword_inside_a_schema_does_not_keep_a_security_scheme(): void
+    {
+        // `security` is an OpenAPI Security Requirement only OUTSIDE a Schema Object
+        // (root/operation position). A custom/non-standard `security` annotation
+        // inside a granted schema must NOT be read as a requirement and keep an
+        // otherwise-unreferenced securityScheme (auth-metadata leak).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'security' => [['InternalOAuth' => []]],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['securitySchemes' => [
+                'InternalOAuth' => ['type' => 'http', 'scheme' => 'bearer'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
+    }
+
     public function test_drops_link_with_percent_encoded_operationref_to_filtered_operation(): void
     {
         // A link whose operationRef is a PERCENT-ENCODED same-document JSON Pointer

@@ -1417,11 +1417,17 @@ final class OpenApiSpecService
                         continue;
                     }
 
-                    // `security` keyword: a Security Requirement array referencing
-                    // schemes by name (leaf data — no nested refs to recurse).
+                    // `security` keyword: an OpenAPI Security Requirement array
+                    // referencing schemes by name (leaf data — no nested refs).
+                    // It is a requirement ONLY outside a Schema Object (root /
+                    // operation position). A non-standard `security` annotation
+                    // INSIDE a schema is not a real keyword — treat it as opaque
+                    // data so it can't mark (leak) an unrelated securityScheme.
                     if ($key === 'security') {
-                        foreach ($this->securityRequirementSchemes($child) as $name) {
-                            $refs[] = 'securitySchemes/'.$name;
+                        if (! $inSchema) {
+                            foreach ($this->securityRequirementSchemes($child) as $name) {
+                                $refs[] = 'securitySchemes/'.$name;
+                            }
                         }
 
                         continue;
