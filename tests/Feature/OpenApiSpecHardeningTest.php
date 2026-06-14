@@ -482,6 +482,56 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Node']);
     }
 
+    public function test_follows_callback_component_alias_during_pruning(): void
+    {
+        // A callback component that is a Reference Object (Alias -> Real) must
+        // keep its target callback reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['$ref' => '#/components/callbacks/Alias']],
+            ]]],
+            'components' => ['callbacks' => [
+                'Alias' => ['$ref' => '#/components/callbacks/Real'],
+                'Real' => ['{$request.body#/u}' => ['post' => ['responses' => ['200' => ['description' => 'ack']]]]],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['callbacks']))->toContain('Alias')->toContain('Real');
+    }
+
+    public function test_anchor_declared_under_keyword_named_property_is_resolved(): void
+    {
+        // A $dynamicAnchor declared inside a schema PROPERTY named "links" must
+        // still register as an anchor owner (property name, not keyword), so a
+        // $dynamicRef to it keeps the holder reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Root'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Root' => ['type' => 'object', 'properties' => ['x' => ['$dynamicRef' => '#node']]],
+                'Holder' => ['type' => 'object', 'properties' => ['links' => ['$dynamicAnchor' => 'node', 'type' => 'object']]],
+                'Unused' => ['type' => 'string'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))
+            ->toContain('Root')->toContain('Holder')->not->toContain('Unused');
+    }
+
     public function test_callback_expression_keyed_like_keyword_is_walked(): void
     {
         // A callback whose expression key looks like a keyword ("x-cb"/"security")

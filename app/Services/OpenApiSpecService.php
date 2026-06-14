@@ -1005,9 +1005,14 @@ final class OpenApiSpecService
             if (in_array($type, ['examples', 'links'], true)) {
                 $children = $this->collectReachableRefs(['$ref' => (is_array($component) ? ($component['$ref'] ?? null) : null)]);
             } elseif ($type === 'callbacks') {
-                $children = [];
-                foreach ($this->asArray($component) as $pathItem) {
-                    $children = [...$children, ...$this->collectReachableRefs($pathItem)];
+                if (is_array($component) && isset($component['$ref'])) {
+                    // Callback component that is itself a Reference Object (alias).
+                    $children = $this->collectReachableRefs(['$ref' => $component['$ref']]);
+                } else {
+                    $children = [];
+                    foreach ($this->asArray($component) as $pathItem) {
+                        $children = [...$children, ...$this->collectReachableRefs($pathItem)];
+                    }
                 }
             } else {
                 $children = $this->collectReachableRefs($component);
@@ -1023,42 +1028,15 @@ final class OpenApiSpecService
 
     /**
      * Collects the JSON Schema anchor names ($anchor / $dynamicAnchor /
-     * $recursiveAnchor) declared anywhere within a node.
+     * $recursiveAnchor) declared within a node, using the SAME guards as ref
+     * collection (so data payloads are skipped but a schema property literally
+     * named "links"/"default" is still walked for real anchors).
      *
      * @return list<string>
      */
     private function collectAnchorNames(mixed $node): array
     {
-        $names = [];
-
-        $walk = static function (mixed $value) use (&$walk, &$names): void {
-            if (! is_array($value)) {
-                return;
-            }
-            foreach ($value as $key => $child) {
-                // Skip data subtrees (a $dynamicAnchor inside example/link/x-*
-                // data is not a real schema anchor), matching collectReachableRefs.
-                // `links` Link Objects hold no schemas; their parameters/requestBody
-                // are data.
-                if (in_array($key, ['example', 'examples', 'default', 'const', 'enum', 'links'], true)
-                    || (is_string($key) && str_starts_with($key, 'x-'))
-                ) {
-                    continue;
-                }
-                if (($key === '$anchor' || $key === '$dynamicAnchor' || $key === '$recursiveAnchor')
-                    && is_string($child) && $child !== ''
-                ) {
-                    $names[] = $child;
-
-                    continue;
-                }
-                $walk($child);
-            }
-        };
-
-        $walk($node);
-
-        return $names;
+        return $this->walkReachability($node)['anchors'];
     }
 
     /**
@@ -1080,11 +1058,16 @@ final class OpenApiSpecService
      * Pass $keysAreNames=true when $node is itself a NAME map (e.g. the top-level
      * paths/webhooks maps, whose keys are arbitrary path/webhook names).
      *
-     * @return list<string>
+     * Returns BOTH the reachability refs and the anchor declarations
+     * ($anchor/$dynamicAnchor/$recursiveAnchor) found, so anchor collection shares
+     * the exact same keyword/name-map/data-skip guards as ref collection.
+     *
+     * @return array{refs: list<string>, anchors: list<string>}
      */
-    private function collectReachableRefs(mixed $node, bool $keysAreNames = false): array
+    private function walkReachability(mixed $node, bool $keysAreNames = false): array
     {
         $refs = [];
+        $anchors = [];
         $prefix = '#/components/';
 
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"
@@ -1107,7 +1090,7 @@ final class OpenApiSpecService
             }
         };
 
-        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$addComponent, $nameMaps, $prefix): void {
+        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $prefix): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1117,6 +1100,16 @@ final class OpenApiSpecService
                     // a `$ref`/`security` inside them is not a real reference, so
                     // skip the whole subtree (like example/default data).
                     if (is_string($key) && str_starts_with($key, 'x-')) {
+                        continue;
+                    }
+
+                    // JSON Schema anchor declarations (resolved by anchor-fragment
+                    // refs). Collected here so anchor scanning shares these guards.
+                    if (($key === '$anchor' || $key === '$dynamicAnchor' || $key === '$recursiveAnchor')
+                        && is_string($child) && $child !== ''
+                    ) {
+                        $anchors[] = $child;
+
                         continue;
                     }
 
@@ -1231,7 +1224,17 @@ final class OpenApiSpecService
 
         $walk($node, $keysAreNames);
 
-        return $refs;
+        return ['refs' => $refs, 'anchors' => $anchors];
+    }
+
+    /**
+     * Component reachability refs in a node (see walkReachability).
+     *
+     * @return list<string>
+     */
+    private function collectReachableRefs(mixed $node, bool $keysAreNames = false): array
+    {
+        return $this->walkReachability($node, $keysAreNames)['refs'];
     }
 
     /**
