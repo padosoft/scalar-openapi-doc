@@ -1966,6 +1966,39 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
     }
 
+    public function test_anchor_in_a_schema_callbacks_annotation_does_not_keep_hidden_schema(): void
+    {
+        // The anchor-owner scan must use schema context for components.schemas: a
+        // `$anchor` buried in a non-standard `callbacks` annotation of an otherwise
+        // unreachable schema must NOT be attributed to it, or a surviving
+        // `#anchor` ref would keep that hidden schema (and ship its annotation).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#secretAnchor'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Hidden' => [
+                    'type' => 'object',
+                    'callbacks' => ['cb' => ['{$req}' => ['post' => [
+                        'requestBody' => ['content' => ['application/json' => [
+                            'schema' => ['$anchor' => 'secretAnchor', 'type' => 'string'],
+                        ]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ]]]],
+                ],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
     public function test_callbacks_inside_a_schema_do_not_keep_a_hidden_callback(): void
     {
         // `callbacks` is not valid inside a Schema Object; a schema annotation named

@@ -1149,8 +1149,14 @@ final class OpenApiSpecService
             ) {
                 continue;
             }
+            // A `schemas` entry IS a Schema Object — scan it in schema context so
+            // the same guards used when draining its refs apply here too (e.g. a
+            // non-standard `callbacks`/`links` annotation is skipped). Otherwise an
+            // anchor buried in such an annotation would be attributed to the schema,
+            // and a surviving `#anchor` ref would keep that hidden schema reachable.
+            $entryInSchema = (string) $type === 'schemas';
             foreach ($entries as $name => $entry) {
-                foreach ($this->collectAnchorNames($entry) as $anchor) {
+                foreach ($this->collectAnchorNames($entry, $entryInSchema) as $anchor) {
                     $anchorOwners[$anchor][] = ((string) $type).'/'.((string) $name);
                 }
             }
@@ -1313,9 +1319,9 @@ final class OpenApiSpecService
      *
      * @return list<string>
      */
-    private function collectAnchorNames(mixed $node): array
+    private function collectAnchorNames(mixed $node, bool $inSchema = false): array
     {
-        return $this->walkReachability($node)['anchors'];
+        return $this->walkReachability($node, false, false, $inSchema)['anchors'];
     }
 
     /**
