@@ -296,6 +296,11 @@ final class OpenApiSpecService
         // operation can't leak a hidden endpoint's operationId/path via a link.
         $spec = $this->pruneDanglingLinks($spec);
 
+        // Re-prune: a dropped link may have been the only reference keeping some
+        // component (e.g. a schema under components.links.X) reachable, so a second
+        // pass removes anything now orphaned by the link removal.
+        $spec = $this->pruneComponents($spec);
+
         return $spec;
     }
 
@@ -342,14 +347,42 @@ final class OpenApiSpecService
             }
         }
 
-        // Which components.links survive (by their own target). A $ref to another
-        // components.link is conservatively kept (chains are rare).
+        // Which components.links survive. First mark the ones with a DIRECT target
+        // (operationId/operationRef, or no target), then resolve alias links
+        // ($ref to another components.link) to a fixpoint so a surviving chain
+        // Alias -> Real is kept while an alias to a dropped link is removed.
+        $componentLinks = $this->asArray($components['links'] ?? null);
         $survivingLinkNames = [];
-        foreach ($this->asArray($components['links'] ?? null) as $name => $link) {
+        foreach ($componentLinks as $name => $link) {
+            if (is_array($link) && isset($link['$ref'])) {
+                continue; // alias — decided in the fixpoint below
+            }
             if ($this->linkTargetSurvives($link, $ids, $locations, [])) {
                 $survivingLinkNames[(string) $name] = true;
             }
         }
+        $linkRefPrefix = '#/components/links/';
+        do {
+            $changed = false;
+            foreach ($componentLinks as $name => $link) {
+                $key = (string) $name;
+                if (isset($survivingLinkNames[$key]) || ! is_array($link)) {
+                    continue;
+                }
+                $ref = $link['$ref'] ?? null;
+                if (! is_string($ref)) {
+                    continue;
+                }
+                // External link $ref — keep conservatively. A local alias survives
+                // once its target link is known to survive.
+                $survives = ! str_starts_with($ref, $linkRefPrefix)
+                    || isset($survivingLinkNames[substr($ref, strlen($linkRefPrefix))]);
+                if ($survives) {
+                    $survivingLinkNames[$key] = true;
+                    $changed = true;
+                }
+            }
+        } while ($changed);
 
         // Filter inline links recursively (operations → responses + callbacks).
         foreach (['paths', 'webhooks'] as $container) {

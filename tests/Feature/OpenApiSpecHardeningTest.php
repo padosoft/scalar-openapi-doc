@@ -667,6 +667,63 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['paths']['/a']['get']['callbacks']['cb']['{$request.body#/u}']['post']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_reprunes_components_orphaned_by_dropped_links(): void
+    {
+        // /a links to a hidden op via components.links.ToSecret, which carries a
+        // $ref to schemas.Secret. The link is dropped; Secret must NOT survive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'go' => ['$ref' => '#/components/links/ToSecret'],
+                    ]]],
+                ]],
+                '/secret' => ['get' => ['tags' => ['Admin'], 'operationId' => 'getSecret', 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+            'components' => [
+                'links' => ['ToSecret' => [
+                    'operationId' => 'getSecret',
+                    'requestBody' => ['$ref' => '#/components/schemas/Secret'],
+                ]],
+                'schemas' => ['Secret' => ['type' => 'object']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([])
+            ->and($filtered['components'] ?? [])->toBe([]);
+    }
+
+    public function test_preserves_surviving_component_link_alias_chain(): void
+    {
+        // A response link -> components.links.Alias -> components.links.Real, where
+        // Real targets the surviving /a. The whole chain must be kept.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok', 'links' => [
+                    'self' => ['$ref' => '#/components/links/Alias'],
+                ]]],
+            ]]],
+            'components' => ['links' => [
+                'Alias' => ['$ref' => '#/components/links/Real'],
+                'Real' => ['operationId' => 'getA'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toHaveKey('self')
+            ->and(array_keys($filtered['components']['links']))->toContain('Alias')->toContain('Real');
+    }
+
     public function test_prunes_link_operationref_to_filtered_component_path_item(): void
     {
         // A link operationRef into components.pathItems whose target was pruned
