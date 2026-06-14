@@ -1259,7 +1259,11 @@ final class OpenApiSpecService
                 // $ref (alias) may target another path item.
                 $children = $this->collectReachableRefs($component, false, true);
             } else {
-                $children = $this->collectReachableRefs($component);
+                // A `schemas` component is a Schema Object — walk it in schema
+                // context so its JSON Schema `examples` data array isn't mistaken
+                // for an OpenAPI Example Objects map (which would leak a schema a
+                // literal example datum happens to "$ref").
+                $children = $this->collectReachableRefs($component, false, false, $type === 'schemas');
             }
 
             foreach ($children as $child) {
@@ -1308,10 +1312,21 @@ final class OpenApiSpecService
      *
      * @return array{refs: list<string>, anchors: list<string>}
      */
-    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false): array
+    private function walkReachability(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false, bool $inSchema = false): array
     {
         $refs = [];
         $anchors = [];
+
+        // JSON Schema applicator keywords whose value(s) are subschemas. Descending
+        // into any of them (or into the `schema` keyword from an OpenAPI object)
+        // puts us — and everything below — in SCHEMA context, where `examples` is a
+        // raw-data array (JSON Schema keyword), NOT an OpenAPI Example Objects map.
+        $schemaSubMaps = ['properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas'];
+        $schemaSubKeys = [
+            'items', 'prefixItems', 'additionalProperties', 'additionalItems',
+            'unevaluatedItems', 'unevaluatedProperties', 'contains', 'propertyNames',
+            'contentSchema', 'not', 'if', 'then', 'else', 'allOf', 'anyOf', 'oneOf',
+        ];
 
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"
         // there is a name, not a keyword): JSON Schema schema-maps plus the
@@ -1351,7 +1366,7 @@ final class OpenApiSpecService
             $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1432,9 +1447,9 @@ final class OpenApiSpecService
                             }
                             foreach ($callback as $pathItem) {
                                 // Each value is a callback path item — a path-item
-                                // position, so its top-level $ref may reuse a
-                                // pathItems/callbacks component.
-                                $walk($pathItem, false, true);
+                                // position (not a schema), so its top-level $ref may
+                                // reuse a pathItems component.
+                                $walk($pathItem, false, true, false);
                             }
                         }
 
@@ -1468,20 +1483,24 @@ final class OpenApiSpecService
                         continue;
                     }
 
-                    // `examples` keyword: a JSON-Schema array of raw values
-                    // (data) or a map of Example Objects. An Example Objects map
-                    // with digit-only/sequential names ("0","1",…) decodes to a
-                    // PHP list, so we must NOT gate on array_is_list (that would
-                    // skip its real {$ref: #/components/examples/X} entries and
-                    // leave a dangling ref after pruning). Iterate either way and
-                    // collect each entry's own $ref — a genuine JSON-Schema values
-                    // array holds raw data whose top-level key isn't "$ref", so
-                    // nothing is collected from it. We never recurse into an
-                    // example's `value`, so example DATA is still skipped.
+                    // `examples`: meaning depends on context.
+                    //  - In a Schema Object ($inSchema) it is the JSON Schema
+                    //    keyword: an ARRAY of raw example DATA. A datum may itself be
+                    //    an object containing a literal "$ref" — that is data, not a
+                    //    reference, so we must skip it entirely (collecting it would
+                    //    keep an otherwise-unreferenced schema → leak).
+                    //  - In a Media Type / Parameter / Header Object it is a map of
+                    //    Example Objects; an entry may be {$ref: #/components/examples/X}.
+                    //    A digit-only/sequential-named map decodes to a PHP list, so
+                    //    we iterate regardless of list-ness (NOT array_is_list) and
+                    //    collect each entry's own $ref. We never recurse into an
+                    //    example's `value`, so example DATA stays skipped either way.
                     if ($key === 'examples' && is_array($child)) {
-                        foreach ($child as $example) {
-                            if (is_array($example)) {
-                                $addComponent($example['$ref'] ?? null);
+                        if (! $inSchema) {
+                            foreach ($child as $example) {
+                                if (is_array($example)) {
+                                    $addComponent($example['$ref'] ?? null);
+                                }
                             }
                         }
 
@@ -1491,12 +1510,22 @@ final class OpenApiSpecService
 
                 // Entering a name-map: its children's keys are names, so keyword
                 // handling must NOT apply at that level.
-                $childKeysAreNames = ! $keysAreNames && in_array((string) $key, $nameMaps, true);
-                $walk($child, $childKeysAreNames, false); // sub-content is not a path-item position
+                $keyStr = (string) $key;
+                $childKeysAreNames = ! $keysAreNames && in_array($keyStr, $nameMaps, true);
+                // Enter (and stay in) schema context when descending through a
+                // schema keyword. Only meaningful in keyword position — a property
+                // literally NAMED "schema"/"items" is a name, not a keyword. Schema
+                // context is monotonic downward (a subschema is always a schema).
+                $childInSchema = $inSchema || (! $keysAreNames && (
+                    $keyStr === 'schema'
+                    || in_array($keyStr, $schemaSubMaps, true)
+                    || in_array($keyStr, $schemaSubKeys, true)
+                ));
+                $walk($child, $childKeysAreNames, false, $childInSchema); // sub-content is not a path-item position
             }
         };
 
-        $walk($node, $keysAreNames, $pathItemContext);
+        $walk($node, $keysAreNames, $pathItemContext, $inSchema);
 
         return ['refs' => $refs, 'anchors' => $anchors];
     }
@@ -1506,9 +1535,9 @@ final class OpenApiSpecService
      *
      * @return list<string>
      */
-    private function collectReachableRefs(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false): array
+    private function collectReachableRefs(mixed $node, bool $keysAreNames = false, bool $pathItemContext = false, bool $inSchema = false): array
     {
-        return $this->walkReachability($node, $keysAreNames, $pathItemContext)['refs'];
+        return $this->walkReachability($node, $keysAreNames, $pathItemContext, $inSchema)['refs'];
     }
 
     /**

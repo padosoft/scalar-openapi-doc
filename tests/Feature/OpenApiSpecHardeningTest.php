@@ -1914,4 +1914,54 @@ class OpenApiSpecHardeningTest extends TestCase
 
         expect(array_keys($filtered['components']['examples']))->toBe(['Sample']);
     }
+
+    public function test_json_schema_examples_data_does_not_keep_a_referenced_schema(): void
+    {
+        // `examples` INSIDE a Schema Object is the JSON Schema keyword: an array of
+        // raw example DATA. A datum shaped like {"$ref":"#/components/schemas/Internal"}
+        // is data, NOT a reference — it must not keep the Internal schema reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'examples' => [['$ref' => '#/components/schemas/Internal']],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Internal' => ['type' => 'object', 'description' => 'secret']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_component_schema_examples_data_does_not_keep_a_referenced_schema(): void
+    {
+        // Same leak, but the JSON Schema example data lives in a reachable COMPONENT
+        // schema (drained in schema context). The granted op keeps Pet; Pet's
+        // `examples` datum that "$ref"s Internal must not drag Internal along.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Pet'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Pet' => ['type' => 'object', 'examples' => [['$ref' => '#/components/schemas/Internal']]],
+                'Internal' => ['type' => 'object', 'description' => 'secret'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
+    }
 }
