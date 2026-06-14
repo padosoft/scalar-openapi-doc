@@ -2879,6 +2879,36 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_schema_applicator_arrays_keep_reachable_refs(): void
+    {
+        // Array-position JSON-Schema applicators (`allOf` / `anyOf` / `oneOf` / `prefixItems`)
+        // are indexed by integers. If these array members are skipped, a referenced schema
+        // can be dropped during pruning and the surviving schema becomes dangling.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'allOf' => [
+                            ['$ref' => '#/components/schemas/Visible'],
+                            ['$ref' => '#/components/schemas/Hidden'],
+                        ],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Visible' => ['type' => 'string'],
+                'Hidden' => ['type' => 'string', 'description' => 'secret'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Visible', 'Hidden']);
+    }
+
     public function test_component_schema_examples_data_does_not_keep_a_referenced_schema(): void
     {
         // Same leak, but the JSON Schema example data lives in a reachable COMPONENT

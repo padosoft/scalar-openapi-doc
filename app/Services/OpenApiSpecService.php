@@ -1512,7 +1512,7 @@ final class OpenApiSpecService
             $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys, $schemaKeywords): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation, bool $inSchemaSubArray = false) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys, $schemaKeywords): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1529,17 +1529,29 @@ final class OpenApiSpecService
                     // ONLY known JSON-Schema keywords (refs/anchors/discriminator here,
                     // subschema keywords below). Any other keyword-position member is
                     // opaque annotation/scalar DATA and is skipped, so it can never
-                    // pull a component into the filtered spec. A non-string key (e.g. a
-                    // numeric `"0"` keyword that json_decode stores as int) is never a
-                    // JSON-Schema keyword, so it is skipped too.
+                    // pull a component into the filtered spec. A non-string key
+                    // (e.g. a numeric `"0"` keyword that json_decode stores as int) is
+                    // usually not a keyword and is skipped.
                     if ($inSchema
-                        && (! is_string($key)
-                            || (! in_array($key, $schemaKeywords, true)
-                                && ! in_array($key, $schemaSubMaps, true)
-                                && ! in_array($key, $schemaSubKeys, true)))
+                        && ! $inSchemaSubArray
+                        && ! is_string($key)
                     ) {
                         continue;
                     }
+
+                    if ($inSchema
+                        && ! $inSchemaSubArray
+                        && is_string($key)
+                        && ! in_array($key, $schemaKeywords, true)
+                        && ! in_array($key, $schemaSubMaps, true)
+                        && ! in_array($key, $schemaSubKeys, true)
+                    ) {
+                        continue;
+                    }
+                    // Note: schema applicator arrays (`allOf` / `anyOf` / `oneOf` /
+                    // `prefixItems`) hold numeric indexes that must remain
+                    // walkable, which is handled by `$inSchemaSubArray` set on the
+                    // child when the current key is a schema applicator keyword.
 
                     // JSON Schema anchor declarations (resolved by anchor-fragment
                     // refs) — ONLY meaningful inside a schema, so an `$anchor` member
@@ -1714,6 +1726,7 @@ final class OpenApiSpecService
                     || in_array($keyStr, $schemaSubMaps, true)
                     || in_array($keyStr, $schemaSubKeys, true)
                 ));
+                $childInSchemaSubArray = $inSchema && ! $keysAreNames && in_array($keyStr, $schemaSubKeys, true) && is_array($child);
                 // A child keyed by an HTTP verb is an Operation Object ONLY when its
                 // parent is a Path Item ($pathItemContext) — otherwise a nested
                 // object literally named `get`/`post` (in a response/header/schema)
@@ -1721,7 +1734,7 @@ final class OpenApiSpecService
                 // members wrongly interpreted. Its DIRECT `security`/`callbacks` are
                 // then real; the flag is single-level (sub-objects reset it).
                 $childInOperation = $pathItemContext && ! $keysAreNames && in_array($keyStr, self::HTTP_VERBS, true);
-                $walk($child, $childKeysAreNames, false, $childInSchema, $childInOperation); // sub-content is not a path-item position
+                $walk($child, $childKeysAreNames, false, $childInSchema, $childInOperation, $childInSchemaSubArray); // sub-content is not a path-item position
             }
         };
 
