@@ -323,6 +323,37 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['pathItems']))->toBe(['CallbackDoc']);
     }
 
+    public function test_preserves_path_item_referenced_through_a_callback_component(): void
+    {
+        // The callback is a $ref to components.callbacks/OnEvent, which itself
+        // refs components.pathItems/CallbackDoc. Reachability must follow the
+        // callback-component hop so CallbackDoc survives (else a dangling ref),
+        // while the unreferenced OrphanReuse is scrubbed — with pruning OFF.
+        config(['openapi.prune_components' => false]);
+
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['$ref' => '#/components/callbacks/OnEvent']],
+            ]]],
+            'components' => [
+                'callbacks' => ['OnEvent' => ['{$request.body#/cb}' => ['$ref' => '#/components/pathItems/CallbackDoc']]],
+                'pathItems' => [
+                    'CallbackDoc' => ['post' => ['responses' => ['200' => ['description' => 'ack']]]],
+                    'OrphanReuse' => ['get' => ['responses' => ['200' => ['description' => 'x']]]],
+                ],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['pathItems']))->toBe(['CallbackDoc'])
+            ->and($filtered['components']['callbacks'])->toHaveKey('OnEvent');
+    }
+
     public function test_path_item_ref_operations_are_grantable_by_endpoint(): void
     {
         $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect([]), collect(['GET /reused']));

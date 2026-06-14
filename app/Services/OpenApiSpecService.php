@@ -279,15 +279,6 @@ final class OpenApiSpecService
             ));
         }
 
-        // Reusable path items were inlined into paths/webhooks (no path-item
-        // $ref survives there), so a role-1 reuse source is now unreferenced and
-        // its UNFILTERED operations must not survive. Scrub components.pathItems
-        // by reachability ALWAYS (independent of the prune_components toggle):
-        // an unreferenced item is dropped (closing the prune-off leak), while one
-        // still referenced by a surviving operation's callback $ref is kept
-        // (preserving valid callback documentation).
-        $spec = $this->scrubUnreachablePathItems($spec);
-
         // Root `security` applies only to operations that don't override it. If
         // no surviving operation inherits it, the requirement is vacuous — and
         // would dangle (referencing a securityScheme that pruning then removes),
@@ -296,10 +287,14 @@ final class OpenApiSpecService
             unset($spec['security']);
         }
 
-        // Prune orphan components.
-        if (Config::boolean('openapi.prune_components', true)) {
-            $spec = $this->pruneComponents($spec);
-        }
+        // Prune components by transitive reachability. components.pathItems are
+        // ALWAYS pruned (they carry operations — an inlined reuse source orphaned
+        // above must not survive, or its ungranted operations leak); the
+        // prune_components toggle only governs the other, non-security-sensitive
+        // buckets (schemas, responses, …). The closure follows callbacks →
+        // pathItems, so a pathItem reused through a granted operation's callback
+        // (inline or via a components.callbacks ref) is correctly preserved.
+        $spec = $this->pruneComponents($spec, Config::boolean('openapi.prune_components', true));
 
         return $spec;
     }
@@ -348,12 +343,20 @@ final class OpenApiSpecService
     // ---------------------------------------------------------------------
 
     /**
-     * Removes from 'components' everything not reachable from the surviving paths.
+     * Removes from 'components' entries not reachable (transitively) from the
+     * surviving paths/webhooks.
+     *
+     * `components.pathItems` are ALWAYS pruned by reachability because they carry
+     * operation definitions (security-sensitive). When $pruneAll is false the
+     * other buckets (schemas/responses/…) are kept verbatim — that toggle is a
+     * keep-everything convenience, never a reason to retain unreachable path
+     * items. The reachability closure follows callbacks → pathItems, so a path
+     * item reused through a granted operation's callback is preserved.
      *
      * @param  array<string, mixed>  $spec
      * @return array<string, mixed>
      */
-    private function pruneComponents(array $spec): array
+    private function pruneComponents(array $spec, bool $pruneAll = true): array
     {
         $components = $spec['components'] ?? null;
         if (! is_array($components)) {
@@ -398,10 +401,11 @@ final class OpenApiSpecService
             }
         }
 
-        // Rebuild components keeping only reachable entries.
+        // Rebuild components. pathItems are always pruned by reachability; other
+        // buckets only when $pruneAll (otherwise kept verbatim).
         $pruned = [];
         foreach ($components as $type => $entries) {
-            if (! is_array($entries)) {
+            if (! is_array($entries) || (! $pruneAll && $type !== 'pathItems')) {
                 $pruned[$type] = $entries;
 
                 continue;
@@ -453,79 +457,6 @@ final class OpenApiSpecService
         $walk($node);
 
         return $refs;
-    }
-
-    /**
-     * Removes components.pathItems entries not reachable (transitively) from the
-     * surviving paths/webhooks. Runs ALWAYS — independent of prune_components —
-     * because pathItems hold operation definitions: after inlining, an orphaned
-     * reuse source must be dropped (or its unfiltered operations leak), while a
-     * pathItem still referenced by a surviving callback $ref must be kept.
-     *
-     * @param  array<string, mixed>  $spec
-     * @return array<string, mixed>
-     */
-    private function scrubUnreachablePathItems(array $spec): array
-    {
-        $components = $spec['components'] ?? null;
-        if (! is_array($components) || ! is_array($components['pathItems'] ?? null)) {
-            return $spec;
-        }
-
-        /** @var array<array-key, mixed> $pathItems */
-        $pathItems = $components['pathItems'];
-
-        $reachable = [];
-        $queue = [
-            ...$this->collectPathItemRefs($spec['paths'] ?? []),
-            ...$this->collectPathItemRefs($spec['webhooks'] ?? []),
-        ];
-        while ($queue !== []) {
-            $name = array_pop($queue);
-            if (isset($reachable[$name]) || ! array_key_exists($name, $pathItems)) {
-                continue;
-            }
-            $reachable[$name] = true;
-            foreach ($this->collectPathItemRefs($pathItems[$name]) as $child) {
-                if (! isset($reachable[$child])) {
-                    $queue[] = $child;
-                }
-            }
-        }
-
-        $kept = array_intersect_key($pathItems, $reachable);
-        if ($kept === []) {
-            unset($components['pathItems']);
-        } else {
-            $components['pathItems'] = $kept;
-        }
-
-        if ($components === []) {
-            unset($spec['components']);
-        } else {
-            $spec['components'] = $components;
-        }
-
-        return $spec;
-    }
-
-    /**
-     * Names of components.pathItems referenced ("$ref": "#/components/pathItems/X")
-     * anywhere within a node (e.g. a surviving operation's callbacks).
-     *
-     * @return list<string>
-     */
-    private function collectPathItemRefs(mixed $node): array
-    {
-        $names = [];
-        $prefix = 'pathItems/';
-        foreach ($this->collectComponentRefs($node) as $ref) {
-            if (str_starts_with($ref, $prefix)) {
-                $names[] = substr($ref, strlen($prefix));
-            }
-        }
-
-        return $names;
     }
 
     // ---------------------------------------------------------------------
