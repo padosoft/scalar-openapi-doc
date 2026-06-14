@@ -381,14 +381,23 @@ final class OpenApiSpecService
                 if (! is_string($ref)) {
                     continue;
                 }
-                // External link $ref — keep conservatively. A same-document alias
-                // survives once its target link is known to survive AND its own
-                // sibling operationId/operationRef (if any) also survive — a
-                // malformed alias must not leak via a sibling field.
+                // A same-document alias survives once its target link is known to
+                // survive AND its own sibling operationId/operationRef (if any)
+                // also survive — a malformed alias must not leak via a sibling.
+                // A same-document $ref to a NON-links component (e.g. a schema) is
+                // malformed: never mark it surviving. Only a truly external/unknown
+                // $ref is kept conservatively.
                 $fragment = $this->localFragment($ref);
-                $isLocalAlias = $fragment !== null && str_starts_with($fragment, $linkFragmentPrefix);
-                $aliasTargetSurvives = ! $isLocalAlias
-                    || isset($survivingLinkNames[substr((string) $fragment, strlen($linkFragmentPrefix))]);
+                if ($fragment !== null) {
+                    if (! str_starts_with($fragment, $linkFragmentPrefix)) {
+                        continue; // local ref to a non-link component — drop
+                    }
+                    $aliasTargetSurvives = isset(
+                        $survivingLinkNames[substr($fragment, strlen($linkFragmentPrefix))]
+                    );
+                } else {
+                    $aliasTargetSurvives = true; // external/unknown — conservative keep
+                }
                 if ($aliasTargetSurvives && $this->linkSiblingTargetsSurvive($link, $ids, $locations)) {
                     $survivingLinkNames[$key] = true;
                     $changed = true;
@@ -575,10 +584,15 @@ final class OpenApiSpecService
         if (is_string($ref)) {
             $fragmentPrefix = '/components/links/';
             $fragment = $this->localFragment($ref);
-            if ($fragment !== null && str_starts_with($fragment, $fragmentPrefix)
-                && ! isset($survivingLinkNames[substr($fragment, strlen($fragmentPrefix))])
-            ) {
-                return false; // local link alias to a dropped components.link
+            if ($fragment !== null) {
+                // A Link's same-document $ref MUST point to components.links; any
+                // other local component ref is malformed — drop the link (don't
+                // let it keep, or dangle at, a non-link component like a schema).
+                if (! str_starts_with($fragment, $fragmentPrefix)
+                    || ! isset($survivingLinkNames[substr($fragment, strlen($fragmentPrefix))])
+                ) {
+                    return false;
+                }
             }
             // external/unknown $ref: not a local leak — fall through to siblings.
         }
@@ -1207,13 +1221,16 @@ final class OpenApiSpecService
             $aliasRef = is_array($component) && is_string($component['$ref'] ?? null) ? $component['$ref'] : null;
 
             if (in_array($type, ['examples', 'links'], true)) {
-                // Example/Link: follow only an alias $ref; other fields are data.
+                // Example/Link: follow only an alias $ref to a SAME-TYPE component;
+                // other fields are data and a $ref to a different component type
+                // (e.g. a schema) is malformed — never followed, so it can't keep
+                // a hidden component alive.
                 $owning = $aliasRef !== null ? $this->owningComponentRef($aliasRef) : null;
-                $children = $owning !== null ? [$owning] : [];
+                $children = ($owning !== null && str_starts_with($owning, $type.'/')) ? [$owning] : [];
             } elseif ($type === 'callbacks') {
                 if ($aliasRef !== null) {
                     $owning = $this->owningComponentRef($aliasRef); // callback alias
-                    $children = $owning !== null ? [$owning] : [];
+                    $children = ($owning !== null && str_starts_with($owning, 'callbacks/')) ? [$owning] : [];
                 } else {
                     // Callback Object: a map of runtime expressions => path items.
                     $children = [];
@@ -1288,7 +1305,7 @@ final class OpenApiSpecService
         // path item is then walked in keyword position.
         $nameMaps = [
             'properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas',
-            'headers', 'content', 'encoding', 'variables', 'responses',
+            'headers', 'content', 'encoding', 'variables', 'responses', 'scopes',
         ];
 
         // Resolves a SAME-DOCUMENT ref (pure "#/..." or a relative "./file#/...")
@@ -1362,12 +1379,16 @@ final class OpenApiSpecService
                     }
 
                     // `links` map: a Link Object's only component reference is its
-                    // own `$ref` (to components.links). Its `parameters`/
-                    // `requestBody` are literal expression/Any DATA — never walked.
+                    // own `$ref`, which must point to components.links — a $ref to
+                    // any other component is malformed and dropped (it must not
+                    // keep e.g. a hidden schema alive). parameters/requestBody are
+                    // literal expression/Any DATA — never walked.
                     if ($key === 'links' && is_array($child)) {
                         foreach ($child as $link) {
-                            if (is_array($link)) {
-                                $addComponent($link['$ref'] ?? null);
+                            $linkRef = is_array($link) && is_string($link['$ref'] ?? null) ? $link['$ref'] : null;
+                            $owning = $linkRef !== null ? $this->owningComponentRef($linkRef) : null;
+                            if ($owning !== null && str_starts_with($owning, 'links/')) {
+                                $refs[] = $owning;
                             }
                         }
 

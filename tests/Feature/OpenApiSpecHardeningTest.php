@@ -1761,4 +1761,67 @@ class OpenApiSpecHardeningTest extends TestCase
             ['url' => 'https://api.example.com'],
         ]);
     }
+
+    public function test_malformed_link_ref_to_a_schema_is_dropped_and_does_not_leak_it(): void
+    {
+        // A Link Object whose $ref points at a NON-link component (a schema) is
+        // malformed. It must be dropped from the response AND must NOT keep the
+        // targeted schema reachable — otherwise an ungranted schema would leak
+        // into the filtered spec via a bogus link reference.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok', 'links' => [
+                    'bogus' => ['$ref' => '#/components/schemas/Internal'],
+                ]]],
+            ]]],
+            'components' => [
+                'links' => ['AliasToInternal' => ['$ref' => '#/components/schemas/Internal']],
+                'schemas' => ['Internal' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([])
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas')
+            ->and($filtered['components']['links'] ?? [])->not->toHaveKey('AliasToInternal');
+    }
+
+    public function test_scope_named_ref_is_not_followed_as_a_component_reference(): void
+    {
+        // An OAuth2 scope literally named "$ref" is DATA (a scope-name => human
+        // description map), not a component reference. It must not be chased as a
+        // $ref, and the unrelated schema it names must still be pruned.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'security' => [['oauth' => ['$ref']]],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]],
+            'components' => [
+                'securitySchemes' => ['oauth' => [
+                    'type' => 'oauth2',
+                    'flows' => ['implicit' => [
+                        'authorizationUrl' => 'https://example.com/auth',
+                        'scopes' => ['$ref' => '#/components/schemas/Internal'],
+                    ]],
+                ]],
+                'schemas' => ['Internal' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['securitySchemes'])->toHaveKey('oauth')
+            ->and($filtered['components']['securitySchemes']['oauth']['flows']['implicit']['scopes'])
+            ->toBe(['$ref' => '#/components/schemas/Internal'])
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
 }
