@@ -667,6 +667,27 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['paths']['/a']['get']['callbacks']['cb']['{$request.body#/u}']['post']['responses']['200']['links'])->toBe([]);
     }
 
+    public function test_prunes_link_operationref_to_filtered_component_path_item(): void
+    {
+        // A link operationRef into components.pathItems whose target was pruned
+        // (unreferenced) must be dropped, not kept as "external".
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'links' => [
+                    'toHidden' => ['operationRef' => '#/components/pathItems/Hidden/get'],
+                ]]],
+            ]]],
+            'components' => ['pathItems' => ['Hidden' => ['get' => ['responses' => ['200' => ['description' => 'ok']]]]]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_keeps_discriminator_mapping_target_schemas(): void
     {
         // discriminator.mapping values are schema refs (by URI or bare name) not

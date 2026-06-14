@@ -330,7 +330,10 @@ final class OpenApiSpecService
                 $this->collectOperationIds($pathItem, $ids);
             }
         }
-        foreach ($this->asArray($components['pathItems'] ?? null) as $pathItem) {
+        foreach ($this->asArray($components['pathItems'] ?? null) as $name => $pathItem) {
+            foreach ($this->operations($pathItem) as $method => $operation) {
+                $locations['components.pathItems'."\t".strtolower($method)."\t".(string) $name] = true;
+            }
             $this->collectOperationIds($pathItem, $ids);
         }
         foreach ($this->asArray($components['callbacks'] ?? null) as $callback) {
@@ -542,10 +545,12 @@ final class OpenApiSpecService
     }
 
     /**
-     * Whether an `operationRef` targets a surviving operation. Handles the two
-     * LOCAL forms — "#/paths/<escaped-path>/<method>" and
-     * "#/webhooks/<key>/<method>" — checked against the container-aware location
-     * set. Non-local refs (external, or other targets) are left untouched.
+     * Whether an `operationRef` targets a surviving operation. Handles the LOCAL
+     * forms — "#/paths/<escaped-path>/<method>", "#/webhooks/<key>/<method>" and
+     * "#/components/pathItems/<name>/<method>" — checked against the location set.
+     * Any OTHER local "#/components/…" ref (e.g. into a callback, which can't be
+     * unambiguously resolved) is dropped conservatively; external/unknown refs
+     * are left untouched.
      *
      * @param  array<string, true>  $locations
      */
@@ -558,7 +563,7 @@ final class OpenApiSpecService
             }
 
             $rest = substr($operationRef, strlen($prefix));
-            $pos = strrpos($rest, '/');
+            $pos = strrpos($rest, '/'); // path/key may contain '/'; method is last
             if ($pos === false) {
                 return true;
             }
@@ -567,6 +572,26 @@ final class OpenApiSpecService
             $method = strtolower(substr($rest, $pos + 1));
 
             return isset($locations[$container."\t".$method."\t".$key]);
+        }
+
+        $pathItemPrefix = '#/components/pathItems/';
+        if (str_starts_with($operationRef, $pathItemPrefix)) {
+            $rest = substr($operationRef, strlen($pathItemPrefix));
+            $pos = strpos($rest, '/'); // a component name has no '/'
+            if ($pos === false) {
+                return false;
+            }
+            $name = str_replace(['~1', '~0'], ['/', '~'], substr($rest, 0, $pos));
+            $method = strtolower(substr($rest, $pos + 1));
+            if (str_contains($method, '/')) {
+                return false; // pointer goes deeper than an operation — can't confirm
+            }
+
+            return isset($locations['components.pathItems'."\t".$method."\t".$name]);
+        }
+
+        if (str_starts_with($operationRef, '#/components/')) {
+            return false; // other local component op ref we can't safely resolve
         }
 
         return true; // external/unknown operationRef — leave as-is
