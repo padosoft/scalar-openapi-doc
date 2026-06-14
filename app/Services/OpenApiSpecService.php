@@ -1004,7 +1004,7 @@ final class OpenApiSpecService
         // path item is then walked in keyword position.
         $nameMaps = [
             'properties', '$defs', 'definitions', 'patternProperties', 'dependentSchemas',
-            'headers', 'content', 'encoding', 'links', 'callbacks', 'variables',
+            'headers', 'content', 'encoding', 'links', 'callbacks', 'variables', 'responses',
         ];
 
         $addComponent = static function (mixed $ref) use (&$refs, $prefix): void {
@@ -1057,8 +1057,11 @@ final class OpenApiSpecService
                         continue;
                     }
 
-                    // `example` (singular) keyword is free-form data.
-                    if ($key === 'example') {
+                    // Data-bearing schema keywords hold free-form values (which
+                    // may contain a $ref-shaped literal) — never refs. `default`
+                    // is also a Response key, but `responses` is a name map so the
+                    // default Response Object is still walked there, not here.
+                    if (in_array($key, ['example', 'default', 'const', 'enum'], true)) {
                         continue;
                     }
 

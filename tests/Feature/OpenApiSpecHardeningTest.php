@@ -485,6 +485,53 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
     }
 
+    public function test_schema_data_keyword_refs_do_not_keep_components_alive(): void
+    {
+        // $ref-shaped literals inside default/const/enum are data, not refs.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Real'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Real' => ['type' => 'object', 'default' => ['$ref' => '#/components/schemas/SecretA'], 'properties' => [
+                    'k' => ['const' => ['$ref' => '#/components/schemas/SecretB']],
+                ]],
+                'SecretA' => ['type' => 'object'],
+                'SecretB' => ['type' => 'object'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Real']);
+    }
+
+    public function test_default_response_is_walked_for_refs(): void
+    {
+        // responses.default is a real Response Object (not the schema `default`
+        // data keyword), so its schema $ref must keep the component reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['default' => ['description' => 'err', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Err'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Err' => ['type' => 'object'], 'Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Err']);
+    }
+
     public function test_example_data_refs_do_not_keep_components_alive(): void
     {
         // A literal "$ref" inside an `example` value is data, not a reference —
