@@ -530,6 +530,26 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
     }
 
+    public function test_extension_data_refs_do_not_keep_components_alive(): void
+    {
+        // A $ref inside an x-* specification extension is vendor data, not a real
+        // reference — it must not keep an unreachable component alive.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'x-codeSamples' => [['$ref' => '#/components/schemas/Secret']],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->not->toHaveKey('components');
+    }
+
     public function test_schema_data_keyword_refs_do_not_keep_components_alive(): void
     {
         // $ref-shaped literals inside default/const/enum are data, not refs.

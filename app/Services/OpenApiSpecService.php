@@ -1090,6 +1090,13 @@ final class OpenApiSpecService
             }
             foreach ($value as $key => $child) {
                 if (! $keysAreNames) {
+                    // Specification extensions (x-*) are arbitrary vendor data —
+                    // a `$ref`/`security` inside them is not a real reference, so
+                    // skip the whole subtree (like example/default data).
+                    if (is_string($key) && str_starts_with($key, 'x-')) {
+                        continue;
+                    }
+
                     // $ref plus JSON Schema 2020-12 / draft-2019 dynamic refs.
                     if ($key === '$ref' || $key === '$dynamicRef' || $key === '$recursiveRef') {
                         if (is_string($child) && str_starts_with($child, '#') && ! str_contains($child, '/') && $child !== '#') {
