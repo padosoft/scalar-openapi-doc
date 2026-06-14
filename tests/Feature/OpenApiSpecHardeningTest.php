@@ -855,6 +855,58 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered)->not->toHaveKey('components');
     }
 
+    public function test_drops_alias_component_link_with_hidden_sibling(): void
+    {
+        // A components.links alias whose alias target survives but which also has a
+        // sibling operationRef to a filtered op must NOT be marked surviving.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'operationId' => 'getA',
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'go' => ['$ref' => '#/components/links/Alias'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+            'components' => ['links' => [
+                'Alias' => ['$ref' => '#/components/links/Safe', 'operationRef' => '#/paths/~1admin/get'],
+                'Safe' => ['operationId' => 'getA'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
+    public function test_normalizes_uri_case_and_default_port(): void
+    {
+        // Scheme/host case and an explicit default port are equivalent, so a
+        // link operationRef in that form still resolves to the upstream document.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toAdmin' => ['operationRef' => 'HTTPS://SPECS.EXAMPLE.COM:443/openapi.json#/paths/~1admin/get'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
     public function test_normalizes_absolute_operationref_to_current_document(): void
     {
         // An absolute operationRef that normalizes to the upstream document

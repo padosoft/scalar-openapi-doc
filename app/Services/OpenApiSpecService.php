@@ -382,12 +382,14 @@ final class OpenApiSpecService
                     continue;
                 }
                 // External link $ref — keep conservatively. A same-document alias
-                // survives once its target link is known to survive.
+                // survives once its target link is known to survive AND its own
+                // sibling operationId/operationRef (if any) also survive — a
+                // malformed alias must not leak via a sibling field.
                 $fragment = $this->localFragment($ref);
                 $isLocalAlias = $fragment !== null && str_starts_with($fragment, $linkFragmentPrefix);
-                $survives = ! $isLocalAlias
+                $aliasTargetSurvives = ! $isLocalAlias
                     || isset($survivingLinkNames[substr((string) $fragment, strlen($linkFragmentPrefix))]);
-                if ($survives) {
+                if ($aliasTargetSurvives && $this->linkSiblingTargetsSurvive($link, $ids, $locations)) {
                     $survivingLinkNames[$key] = true;
                     $changed = true;
                 }
@@ -581,6 +583,21 @@ final class OpenApiSpecService
             // external/unknown $ref: not a local leak — fall through to siblings.
         }
 
+        return $this->linkSiblingTargetsSurvive($link, $ids, $locations);
+    }
+
+    /**
+     * Whether a Link Object's operationId/operationRef sibling target fields (if
+     * present) resolve to a surviving operation. Shared by inline-link filtering
+     * and the components.links alias fixpoint so a malformed link can't leak a
+     * hidden operation id/path via a sibling.
+     *
+     * @param  array<array-key, mixed>  $link
+     * @param  array<string, true>  $ids
+     * @param  array<string, true>  $locations
+     */
+    private function linkSiblingTargetsSurvive(array $link, array $ids, array $locations): bool
+    {
         $operationId = $link['operationId'] ?? null;
         if (is_string($operationId) && ! isset($ids[$operationId])) {
             return false;
@@ -727,7 +744,15 @@ final class OpenApiSpecService
             return null;
         }
 
-        $origin = $parts['scheme'].'://'.$parts['host'].(isset($parts['port']) ? ':'.$parts['port'] : '');
+        // Scheme and host are case-insensitive; the default port is equivalent to
+        // none — normalise so "HTTPS://Host:443/x" == "https://host/x".
+        $scheme = strtolower((string) $parts['scheme']);
+        $host = strtolower((string) $parts['host']);
+        $port = $parts['port'] ?? null;
+        $isDefaultPort = ($scheme === 'http' && $port === 80) || ($scheme === 'https' && $port === 443);
+        $portStr = ($port !== null && ! $isDefaultPort) ? ':'.$port : '';
+
+        $origin = $scheme.'://'.$host.$portStr;
         $path = $this->normalizePath(is_string($parts['path'] ?? null) ? $parts['path'] : '/');
         $query = isset($parts['query']) ? '?'.$parts['query'] : '';
 
