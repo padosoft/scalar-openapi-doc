@@ -1074,7 +1074,6 @@ final class OpenApiSpecService
     {
         $refs = [];
         $anchors = [];
-        $prefix = '#/components/';
 
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"
         // there is a name, not a keyword): JSON Schema schema-maps plus the
@@ -1087,16 +1086,29 @@ final class OpenApiSpecService
             'headers', 'content', 'encoding', 'variables', 'responses',
         ];
 
-        $addComponent = static function (mixed $ref) use (&$refs, $prefix): void {
-            if (is_string($ref) && str_starts_with($ref, $prefix)) {
-                $segments = explode('/', substr($ref, strlen($prefix)));
-                if (count($segments) >= 2) {
-                    $refs[] = $segments[0].'/'.$segments[1]; // owning "type/name"
-                }
+        // Resolves on the URI FRAGMENT, so a filename-prefixed same-document ref
+        // (e.g. "./openapi.json#/components/schemas/Pet") is normalised like the
+        // bare "#/components/..." form to its owning "type/name".
+        $addComponent = static function (mixed $ref) use (&$refs): void {
+            if (! is_string($ref)) {
+                return;
+            }
+            $hash = strpos($ref, '#');
+            if ($hash === false) {
+                return;
+            }
+            $fragment = substr($ref, $hash + 1);
+            $localPrefix = '/components/';
+            if (! str_starts_with($fragment, $localPrefix)) {
+                return;
+            }
+            $segments = explode('/', substr($fragment, strlen($localPrefix)));
+            if (count($segments) >= 2) {
+                $refs[] = $segments[0].'/'.$segments[1]; // owning "type/name"
             }
         };
 
-        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $prefix): void {
+        $walk = function (mixed $value, bool $keysAreNames) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1186,10 +1198,10 @@ final class OpenApiSpecService
                             if (! is_string($target)) {
                                 continue;
                             }
-                            if (str_starts_with($target, $prefix)) {
-                                $addComponent($target);            // explicit component ref
-                            } elseif (! str_contains($target, '/') && ! str_contains($target, '#')) {
+                            if (! str_contains($target, '/') && ! str_contains($target, '#')) {
                                 $refs[] = 'schemas/'.$target;      // bare name => schema
+                            } else {
+                                $addComponent($target);            // explicit/relative component ref
                             }
                         }
 
