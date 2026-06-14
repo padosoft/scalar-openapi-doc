@@ -12,7 +12,7 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | T1 | Project conventions (docs, rules, resume skill) | `task/project-conventions` | 🟢 merged (PR #3 → `main`, `691db58`) | #3 |
 | T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟢 merged (PR #7 → `main`, `7738203`) | #7 |
 | T3 | RBAC & data model | `task/rbac-data-model` | 🟢 merged (macro PR #12 → `main`) | #12 |
-| T4 | OpenApiSpecService + hardening | `task/openapi-service` | 🟡 in progress (4.1–4.2 merged; 4.3–4.7 hardening PR #14 in review) | — |
+| T4 | OpenApiSpecService + hardening | `task/openapi-service` | 🟡 subtasks merged (#13, #14, #15); macro PR → main open | — |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | ⚪ pending | — |
 | T6 | Admin users + grants | `task/admin-users` | ⚪ pending | — |
 | T7 | Servers + audit | `task/admin-servers-audit` | ⚪ pending | — |
@@ -105,8 +105,14 @@ Branch: `task/openapi-service-4-3-hardening`.
 - **B5/B6 pruning:** filter `paths` AND `webhooks` (3.1); seed `securitySchemes` by NAME from root+operation `security`; **root schemes seeded only when a surviving op inherits root security** (Codex — empty grants drop `components` entirely). Webhook endpoint grants are **namespaced** (`webhook:` prefix) so a webhook keyed identically to a real path can't be exposed by the other's grant (Codex).
 - **B7 servers:** `injectServers` validates entries — non-empty AND a valid absolute http(s) URL via `isValidServerUrl` (rejects `not-a-url`/`javascript:`/`ftp:`, Codex), optional string description.
 - **metadata:** `extractTags`/`extractEndpoints` enumerate `paths` + `webhooks` so webhook-only tags/ops are grantable (Codex).
-- **Gates:** Pest 84/84, PHPStan max 0 (run with `-d memory_limit=1G`), Pint clean. Codex review loop: 4 findings (redirect, webhook metadata, server-url validation, root-security pruning) all fixed; threads resolved.
-- **Next:** merge PR #14 → `task/openapi-service`, then macro PR `task/openapi-service` → `main` (Codex + CI + local gates per the Copilot-outage exception). Then T5.
+- **Gates:** Pest 84/84, PHPStan max 0 (run with `-d memory_limit=1G`), Pint clean. Codex review loop: 5 findings (redirect, webhook metadata, server-url validation, root-security pruning, path/webhook grant collision) all fixed; threads resolved. **Merged (PR #14).**
+
+### Subtask 4.8 — OpenAPI 3.1 path-item `$ref` reuse (PR #15, merged)
+Branch: `task/openapi-service-4-8-pathitem-refs`. Follow-up after a Codex finding slipped past PR #14's merge.
+- A `paths`/`webhooks` entry that is a Reference Object (`{"$ref": "#/components/pathItems/X"}`) was dropped entirely (no inline verb), so granted reused operations vanished for non-admins. `resolvePathItem` resolves the **whole `$ref` chain** (cycle-safe; strips any malformed/external/unsupported ref; no path-item `$ref` survives) and **inlines** only the filtered survivors; `extractTags`/`extractEndpoints` resolve refs too (grantability).
+- Closed a cascade of Codex-found leak vectors: nested-chain ref re-leak via pruning; `prune_components=false` re-exposing the inlined source; callback-referenced pathItems (inline + via `components.callbacks`). **Resolution:** pruning is now an **always-on security invariant** (one full transitive reachability closure, follows callbacks→pathItems); removed the `prune_components` toggle (config key + env + test) — admins still get the full spec via `admin_sees_all`. Also `resolvePathItem` avoids `+=` in a loop (RULES.md ADR-07) via layered `array_replace`.
+- **Gates:** Pest 94/94, PHPStan max 0, Pint clean. 8 Codex findings across 7 rounds, all fixed/resolved. (Final commit `dd32674`: Codex unresponsive to re-nudges over ~50 min while CI green + 0 unresolved threads; merged per the Copilot-outage exception — the macro PR → main provides the next full Codex gate over the same code.)
+- **Next:** macro PR `task/openapi-service` → `main` (Codex + CI + local gates), merge, mark T4 complete, then T5.
 
 ## T5 — task/scalar-proxy
 _Not started._
