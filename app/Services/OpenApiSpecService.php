@@ -177,18 +177,28 @@ final class OpenApiSpecService
             }
         }
 
-        // Tags from operations under both paths and webhooks (3.1), so a
-        // webhook-only tag is still offered in the admin grant UI. Path-item
-        // $refs (components.pathItems reuse) are resolved so their tags count too.
+        // Tags from operations under paths/webhooks AND nested in callbacks AND in
+        // reusable operation-bearing components. filterForUser authorizes callback/
+        // reusable operations by TAG (endpoint grants can't apply there), so a tag
+        // appearing ONLY on such an operation must still be offered here or it could
+        // never be granted (and the operation would always be dropped). Path-item
+        // $refs (components.pathItems reuse) are resolved so reused tags count too.
         $pathItemComponents = $this->pathItemComponents($spec);
         foreach (['paths', 'webhooks'] as $container) {
             foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
-                foreach ($this->operations($this->resolvePathItem($pathItem, $pathItemComponents)) as $operation) {
-                    foreach ($this->asArray($operation['tags'] ?? null) as $name) {
-                        if (is_string($name)) {
-                            $tags[$name] = true;
-                        }
-                    }
+                $this->collectOperationTags($this->resolvePathItem($pathItem, $pathItemComponents), $tags);
+            }
+        }
+        $components = $this->asArray($spec['components'] ?? null);
+        foreach ($this->asArray($components['pathItems'] ?? null) as $pathItem) {
+            if (is_array($pathItem)) {
+                $this->collectOperationTags($pathItem, $tags);
+            }
+        }
+        foreach ($this->asArray($components['callbacks'] ?? null) as $callback) {
+            foreach ($this->asArray($callback) as $cbKey => $cbPathItem) {
+                if ($cbKey !== '$ref' && is_array($cbPathItem)) {
+                    $this->collectOperationTags($cbPathItem, $tags);
                 }
             }
         }
@@ -197,6 +207,32 @@ final class OpenApiSpecService
         sort($names, SORT_NATURAL | SORT_FLAG_CASE);
 
         return $names;
+    }
+
+    /**
+     * Collects operation tags from a Path Item Object into $tags, recursing into
+     * each operation's inline `callbacks` (callback operations are tag-authorized
+     * too, so their tags must be grantable).
+     *
+     * @param  array<array-key, mixed>  $pathItem
+     * @param  array<string, true>  $tags
+     */
+    private function collectOperationTags(array $pathItem, array &$tags): void
+    {
+        foreach ($this->operations($pathItem) as $operation) {
+            foreach ($this->asArray($operation['tags'] ?? null) as $name) {
+                if (is_string($name)) {
+                    $tags[$name] = true;
+                }
+            }
+            foreach ($this->asArray($operation['callbacks'] ?? null) as $callback) {
+                foreach ($this->asArray($callback) as $cbKey => $cbPathItem) {
+                    if ($cbKey !== '$ref' && is_array($cbPathItem)) {
+                        $this->collectOperationTags($cbPathItem, $tags);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -1401,6 +1437,16 @@ final class OpenApiSpecService
             'contentSchema', 'not', 'if', 'then', 'else', 'allOf', 'anyOf', 'oneOf',
         ];
 
+        // OpenAPI structural keys that are NOT JSON Schema keywords. Inside a Schema
+        // Object (in keyword position) any of these is a non-standard annotation,
+        // i.e. opaque DATA — it must be skipped so a schema annotation cannot pull
+        // OpenAPI components (a response/header/link/callback and their schemas)
+        // into the filtered spec. (A schema PROPERTY named like one of these lives
+        // under `properties`, where keys are names, so it is unaffected.)
+        $openApiOnlyKeys = [
+            'links', 'callbacks', 'security', 'responses', 'headers', 'content', 'encoding', 'variables', 'scopes',
+        ];
+
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"
         // there is a name, not a keyword): JSON Schema schema-maps plus the
         // OpenAPI keyed maps (headers/content/encoding/links/callbacks/server
@@ -1439,7 +1485,7 @@ final class OpenApiSpecService
             $refs[] = $owning;
         };
 
-        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys): void {
+        $walk = function (mixed $value, bool $keysAreNames, bool $pathItemContext, bool $inSchema, bool $inOperation) use (&$walk, &$refs, &$anchors, &$addComponent, $nameMaps, $schemaSubMaps, $schemaSubKeys, $openApiOnlyKeys): void {
             if (! is_array($value)) {
                 return;
             }
@@ -1452,11 +1498,11 @@ final class OpenApiSpecService
                         continue;
                     }
 
-                    // `links`/`callbacks` are OpenAPI Response/Operation fields and
-                    // are NOT valid inside a Schema Object. A schema member named
-                    // "links"/"callbacks" is non-standard data — skip it so it can't
-                    // keep a link/callback (operation-bearing) component alive.
-                    if ($inSchema && ($key === 'links' || $key === 'callbacks')) {
+                    // Inside a Schema Object, any OpenAPI-only structural key is a
+                    // non-standard annotation (opaque data) — skip it so it can't
+                    // pull OpenAPI components (links/callbacks/responses/headers/…
+                    // and their schemas) into the filtered spec.
+                    if ($inSchema && is_string($key) && in_array($key, $openApiOnlyKeys, true)) {
                         continue;
                     }
 

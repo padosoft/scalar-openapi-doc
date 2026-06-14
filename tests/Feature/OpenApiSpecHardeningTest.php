@@ -2084,6 +2084,65 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_schema_level_responses_annotation_does_not_keep_components(): void
+    {
+        // A non-standard `responses` annotation inside a Schema Object is opaque
+        // data; it must not mark components.responses (and its nested schemas)
+        // reachable for a non-admin.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'responses' => ['200' => ['$ref' => '#/components/responses/Internal']],
+                    ],
+                ]]]],
+            ]]],
+            'components' => [
+                'responses' => ['Internal' => ['description' => 'secret', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#/components/schemas/Secret'],
+                ]]]],
+                'schemas' => ['Secret' => ['type' => 'object']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('responses')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_callback_only_tag_is_offered_in_grant_metadata(): void
+    {
+        // A tag that appears ONLY on a callback operation must be offered by
+        // extractTags so an admin can grant it (callback ops are tag-authorized).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['{$req}' => ['post' => [
+                    'tags' => ['CallbackOnly'],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ]]]],
+            ]]],
+            'components' => ['callbacks' => ['Shared' => ['{$ev}' => ['post' => [
+                'tags' => ['ReusableCallbackTag'],
+                'responses' => ['200' => ['description' => 'ok']],
+            ]]]]],
+        ];
+
+        $tags = $this->service()->extractTags($spec);
+
+        expect($tags)->toContain('Orders')
+            ->toContain('CallbackOnly')          // inline callback operation tag
+            ->toContain('ReusableCallbackTag');  // reusable components.callbacks tag
+    }
+
     public function test_callbacks_in_a_response_does_not_keep_a_callback_component(): void
     {
         // `callbacks` is an Operation-level keyword. A non-standard `callbacks`
