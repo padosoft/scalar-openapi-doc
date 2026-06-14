@@ -1250,10 +1250,17 @@ final class OpenApiSpecService
             // Anchor fragment ref ("#name"): enqueue every component declaring it.
             if (str_starts_with($ref, self::ANCHOR_REF_PREFIX)) {
                 $anchor = substr($ref, strlen(self::ANCHOR_REF_PREFIX));
-                foreach ($anchorOwners[$anchor] ?? [] as $owner) {
-                    if (! isset($reachable[$owner])) {
-                        $queue[] = $owner;
-                    }
+                // Only an UNAMBIGUOUS anchor (exactly ONE declaring component)
+                // resolves. If several components declare it (duplicate/malformed
+                // anchors, or a name reused across $id scopes we do not track),
+                // enqueueing them all would let an unreferenced component survive
+                // merely by reusing a visible anchor name — a leak. Treat an
+                // ambiguous anchor as UNRESOLVED; a dangling ref from such a
+                // malformed/edge spec is preferable to leaking an ungranted
+                // component. (Full $id base-URI scoping is out of scope.)
+                $owners = array_values(array_unique($anchorOwners[$anchor] ?? []));
+                if (count($owners) === 1 && ! isset($reachable[$owners[0]])) {
+                    $queue[] = $owners[0];
                 }
 
                 continue;
@@ -1436,12 +1443,19 @@ final class OpenApiSpecService
 
                     // $ref plus JSON Schema 2020-12 / draft-2019 dynamic refs.
                     if ($key === '$ref' || $key === '$dynamicRef' || $key === '$recursiveRef') {
-                        if (is_string($child) && str_starts_with($child, '#') && ! str_contains($child, '/') && $child !== '#') {
-                            // Anchor fragment ("#name") — resolved via anchor decls.
-                            $refs[] = self::ANCHOR_REF_PREFIX.substr($child, 1);
+                        // Classify on the DECODED same-document fragment, not the raw
+                        // string: a percent-encoded pointer like
+                        // "#%2Fcomponents%2Fschemas%2FPet" has no literal "/" but is a
+                        // component ref, not an anchor — judging the raw string would
+                        // record a bogus anchor and prune Pet, leaving a dangling ref.
+                        $fragment = is_string($child) ? $this->localFragment($child) : null;
+                        if ($fragment !== null && $fragment !== '' && ! str_contains($fragment, '/')) {
+                            // Same-document anchor fragment ("#name") — via anchor decls.
+                            $refs[] = self::ANCHOR_REF_PREFIX.$fragment;
                         } else {
                             // $pathItemContext: a path-item top-level $ref may reuse
                             // another Path Item ONLY (never a Callback component).
+                            // owningComponentRef handles pointer/external classification.
                             $addComponent($child, $pathItemContext ? 'pathItems' : null);
                         }
 

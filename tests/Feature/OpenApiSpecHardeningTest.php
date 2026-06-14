@@ -1966,6 +1966,53 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->not->toHaveKey('securitySchemes');
     }
 
+    public function test_percent_encoded_same_document_ref_keeps_its_component(): void
+    {
+        // A percent-encoded same-document JSON Pointer $ref must be DECODED and
+        // classified as a component ref (not an anchor named "%2F…"), so its schema
+        // is kept reachable instead of being pruned (which would dangle the ref).
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$ref' => '#%2Fcomponents%2Fschemas%2FPet'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Pet' => ['type' => 'object'], 'Unused' => ['type' => 'string']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
+    }
+
+    public function test_duplicate_anchor_does_not_keep_an_unreferenced_schema(): void
+    {
+        // Two schemas declare the same $dynamicAnchor "node". A bare "#node" ref is
+        // ambiguous; it must NOT enqueue every owner (which would keep the hidden
+        // one). An ambiguous anchor resolves to nothing — no ungranted leak.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => ['$dynamicRef' => '#node'],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => [
+                'Visible' => ['$dynamicAnchor' => 'node', 'type' => 'object'],
+                'Hidden' => ['$dynamicAnchor' => 'node', 'type' => 'object', 'description' => 'secret'],
+            ]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
     public function test_anchor_in_a_schema_callbacks_annotation_does_not_keep_hidden_schema(): void
     {
         // The anchor-owner scan must use schema context for components.schemas: a
