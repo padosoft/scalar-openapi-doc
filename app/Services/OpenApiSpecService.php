@@ -1823,7 +1823,18 @@ final class OpenApiSpecService
             }
         }
 
-        return $kept === [] ? (object) [] : $kept;
+        // Keep path-level (non-operation) fields only when at least one operation
+        // survived — they apply to those operations. With NO surviving operation,
+        // drop schema-bearing fields like `parameters` (the prune would otherwise
+        // walk their $refs and leak schemas to a user with no visible operation
+        // here), but PRESERVE a `$ref` alias: it targets another path-item component
+        // that is filtered on its own pass. A bare emptied item serializes as `{}`.
+        if (array_intersect(array_keys($kept), self::HTTP_VERBS) !== []) {
+            return $kept;
+        }
+        $ref = $kept['$ref'] ?? null;
+
+        return is_string($ref) ? ['$ref' => $ref] : (object) [];
     }
 
     /**
@@ -1867,9 +1878,13 @@ final class OpenApiSpecService
 
         $rebuilt = [];
         foreach ($callback as $expression => $pathItem) {
-            $rebuilt[$expression] = (is_array($pathItem) && ! isset($pathItem['$ref']))
+            // Always filter an inline path item, even one carrying a `$ref`: the
+            // alias is preserved (its target component is filtered separately) while
+            // any SIBLING operations are tag-filtered, so an Admin sibling next to a
+            // public `$ref` can't leak.
+            $rebuilt[$expression] = is_array($pathItem)
                 ? $this->filterPathItemOperationsByTag($pathItem, $tagSet, $usedTags)
-                : $pathItem; // $ref to a pathItems component (filtered there) or non-array
+                : $pathItem;
         }
 
         return $rebuilt;

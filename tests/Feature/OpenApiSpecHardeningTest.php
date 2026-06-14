@@ -2020,6 +2020,71 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_reusable_path_item_with_only_disallowed_ops_drops_path_level_fields(): void
+    {
+        // A components.pathItems reached via a granted callback has only an Admin op
+        // plus a path-level `parameters` referencing a schema. With no surviving
+        // operation, the path-level fields (and their schemas) must be dropped too.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['{$req}' => ['$ref' => '#/components/pathItems/AdminOnly']]],
+            ]]],
+            'components' => [
+                'pathItems' => ['AdminOnly' => [
+                    'parameters' => [['name' => 'x', 'in' => 'query', 'schema' => ['$ref' => '#/components/schemas/Secret']]],
+                    'post' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]],
+                ]],
+                'schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components']['pathItems']['AdminOnly'])->toEqual((object) [])
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
+    public function test_callback_path_item_ref_siblings_are_tag_filtered(): void
+    {
+        // A callback path item with a `$ref` PLUS a sibling Admin operation: the
+        // sibling (and its schema) must be filtered out while the `$ref` alias to a
+        // separately-filtered public path item is preserved.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/a' => ['get' => [
+                'tags' => ['Orders'],
+                'operationId' => 'getA',
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['cb' => ['{$req}' => [
+                    '$ref' => '#/components/pathItems/PublicCb',
+                    'delete' => [
+                        'tags' => ['Admin'],
+                        'requestBody' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret']]]],
+                        'responses' => ['200' => ['description' => 'ok']],
+                    ],
+                ]]],
+            ]]],
+            'components' => [
+                'pathItems' => ['PublicCb' => ['get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]]]],
+                'schemas' => ['Secret' => ['type' => 'object', 'description' => 'secret']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        $cbPathItem = $filtered['paths']['/a']['get']['callbacks']['cb']['{$req}'];
+        expect($cbPathItem)->toHaveKey('$ref')
+            ->and($cbPathItem)->not->toHaveKey('delete')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas')
+            ->and($filtered['components']['pathItems'])->toHaveKey('PublicCb');
+    }
+
     public function test_reusable_path_item_emptied_by_filtering_is_a_json_object(): void
     {
         // A granted operation's callback $refs a components.pathItems whose only
