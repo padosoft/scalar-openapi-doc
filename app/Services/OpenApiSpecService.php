@@ -1444,7 +1444,8 @@ final class OpenApiSpecService
         // into the filtered spec. (A schema PROPERTY named like one of these lives
         // under `properties`, where keys are names, so it is unaffected.)
         $openApiOnlyKeys = [
-            'links', 'callbacks', 'security', 'responses', 'headers', 'content', 'encoding', 'variables', 'scopes',
+            'links', 'callbacks', 'security', 'responses', 'headers', 'content', 'encoding',
+            'variables', 'scopes', 'parameters', 'requestBody',
         ];
 
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"

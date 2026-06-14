@@ -2084,6 +2084,38 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_schema_level_parameters_and_request_body_annotations_do_not_keep_components(): void
+    {
+        // Non-standard `parameters`/`requestBody` annotations inside a Schema Object
+        // are opaque data; their $refs must not keep components.parameters /
+        // components.requestBodies (and the schemas those reference) reachable.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'parameters' => [['$ref' => '#/components/parameters/Internal']],
+                        'requestBody' => ['$ref' => '#/components/requestBodies/Body'],
+                    ],
+                ]]]],
+            ]]],
+            'components' => [
+                'parameters' => ['Internal' => ['name' => 'x', 'in' => 'query', 'schema' => ['$ref' => '#/components/schemas/Secret']]],
+                'requestBodies' => ['Body' => ['content' => ['application/json' => ['schema' => ['$ref' => '#/components/schemas/Secret2']]]]],
+                'schemas' => ['Secret' => ['type' => 'object'], 'Secret2' => ['type' => 'object']],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('parameters')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('requestBodies')
+            ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
     public function test_schema_level_responses_annotation_does_not_keep_components(): void
     {
         // A non-standard `responses` annotation inside a Schema Object is opaque
