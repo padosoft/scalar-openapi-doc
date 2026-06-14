@@ -1445,7 +1445,7 @@ final class OpenApiSpecService
         // under `properties`, where keys are names, so it is unaffected.)
         $openApiOnlyKeys = [
             'links', 'callbacks', 'security', 'responses', 'headers', 'content', 'encoding',
-            'variables', 'scopes', 'parameters', 'requestBody',
+            'variables', 'scopes', 'parameters', 'requestBody', 'schema',
         ];
 
         // Maps whose keys are arbitrary NAMES (so a key like "example"/"security"

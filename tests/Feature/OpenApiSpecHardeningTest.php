@@ -2084,6 +2084,32 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_schema_level_schema_annotation_does_not_keep_a_schema(): void
+    {
+        // A non-standard `schema` key INSIDE a Schema Object is opaque data — its
+        // $ref must not keep the targeted schema. (`schema` introduces a subschema
+        // only from an OpenAPI Media Type/Parameter/Header position, never inside a
+        // schema; the legit content `schema` below is still walked normally.)
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => ['/x' => ['get' => [
+                'tags' => ['Orders'],
+                'responses' => ['200' => ['description' => 'ok', 'content' => ['application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'schema' => ['$ref' => '#/components/schemas/Secret'],
+                    ],
+                ]]]],
+            ]]],
+            'components' => ['schemas' => ['Secret' => ['type' => 'object']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
+    }
+
     public function test_schema_level_parameters_and_request_body_annotations_do_not_keep_components(): void
     {
         // Non-standard `parameters`/`requestBody` annotations inside a Schema Object
