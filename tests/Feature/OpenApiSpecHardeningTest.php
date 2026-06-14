@@ -200,16 +200,6 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered)->not->toHaveKey('security');
     }
 
-    public function test_prune_components_off_keeps_all_components(): void
-    {
-        config(['openapi.prune_components' => false]);
-
-        $filtered = $this->service()->filterForUser($this->spec31(), collect(['Orders']), collect([]));
-
-        expect(array_keys($filtered['components']['schemas']))
-            ->toContain('OrderEvent')->toContain('Orphan')->toContain('WebhookPayload');
-    }
-
     // ---- metadata includes webhooks (grant UI consistency) ----------------
 
     public function test_extract_tags_includes_webhook_tags(): void
@@ -283,13 +273,11 @@ class OpenApiSpecHardeningTest extends TestCase
             ->and($filtered['paths']['/reused'])->not->toHaveKey('$ref');
     }
 
-    public function test_inlined_path_items_are_scrubbed_even_when_pruning_disabled(): void
+    public function test_inlined_path_item_source_is_pruned_after_inlining(): void
     {
-        // With prune_components OFF the inlined GET survives, but the source
-        // components.pathItems.Reused (holding the ungranted Admin DELETE) must
-        // still be removed so the toggle can't re-expose ungranted operations.
-        config(['openapi.prune_components' => false]);
-
+        // The inlined GET survives; the source components.pathItems.Reused
+        // (holding the ungranted Admin DELETE) is now unreferenced and pruned,
+        // so the ungranted operation can never be re-exposed.
         $filtered = $this->service()->filterForUser($this->specWithPathItemRef(), collect(['Orders']), collect([]));
 
         expect($filtered['paths']['/reused'])->toHaveKey('get')
@@ -301,9 +289,7 @@ class OpenApiSpecHardeningTest extends TestCase
     {
         // A granted operation's callback $refs components.pathItems.CallbackDoc;
         // that pathItem must survive (valid callback docs), while an unreferenced
-        // reuse source (OrphanReuse) is scrubbed — even with pruning OFF.
-        config(['openapi.prune_components' => false]);
-
+        // reuse source (OrphanReuse) is pruned.
         $spec = [
             'openapi' => '3.1.0',
             'info' => ['title' => 't', 'version' => '1'],
@@ -328,9 +314,7 @@ class OpenApiSpecHardeningTest extends TestCase
         // The callback is a $ref to components.callbacks/OnEvent, which itself
         // refs components.pathItems/CallbackDoc. Reachability must follow the
         // callback-component hop so CallbackDoc survives (else a dangling ref),
-        // while the unreferenced OrphanReuse is scrubbed — with pruning OFF.
-        config(['openapi.prune_components' => false]);
-
+        // while the unreferenced OrphanReuse is pruned.
         $spec = [
             'openapi' => '3.1.0',
             'info' => ['title' => 't', 'version' => '1'],

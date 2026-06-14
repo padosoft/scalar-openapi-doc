@@ -287,14 +287,12 @@ final class OpenApiSpecService
             unset($spec['security']);
         }
 
-        // Prune components by transitive reachability. components.pathItems are
-        // ALWAYS pruned (they carry operations — an inlined reuse source orphaned
-        // above must not survive, or its ungranted operations leak); the
-        // prune_components toggle only governs the other, non-security-sensitive
-        // buckets (schemas, responses, …). The closure follows callbacks →
+        // Always prune unreachable components from the filtered spec (security
+        // invariant: never ship the definitions of ungranted operations/schemas,
+        // and never leave a dangling $ref). The closure follows callbacks →
         // pathItems, so a pathItem reused through a granted operation's callback
         // (inline or via a components.callbacks ref) is correctly preserved.
-        $spec = $this->pruneComponents($spec, Config::boolean('openapi.prune_components', true));
+        $spec = $this->pruneComponents($spec);
 
         return $spec;
     }
@@ -343,20 +341,20 @@ final class OpenApiSpecService
     // ---------------------------------------------------------------------
 
     /**
-     * Removes from 'components' entries not reachable (transitively) from the
+     * Removes from 'components' everything not reachable (transitively) from the
      * surviving paths/webhooks.
      *
-     * `components.pathItems` are ALWAYS pruned by reachability because they carry
-     * operation definitions (security-sensitive). When $pruneAll is false the
-     * other buckets (schemas/responses/…) are kept verbatim — that toggle is a
-     * keep-everything convenience, never a reason to retain unreachable path
-     * items. The reachability closure follows callbacks → pathItems, so a path
-     * item reused through a granted operation's callback is preserved.
+     * Pruning is ALWAYS applied to a filtered (non-admin) spec — it is a security
+     * invariant, not a convenience: retaining unreachable components would either
+     * leak the definitions of ungranted operations/schemas or leave dangling
+     * $refs. The reachability closure follows every component ref, including
+     * callbacks → pathItems, so a path item reused through a granted operation's
+     * callback is preserved while an orphaned reuse source is dropped.
      *
      * @param  array<string, mixed>  $spec
      * @return array<string, mixed>
      */
-    private function pruneComponents(array $spec, bool $pruneAll = true): array
+    private function pruneComponents(array $spec): array
     {
         $components = $spec['components'] ?? null;
         if (! is_array($components)) {
@@ -401,11 +399,10 @@ final class OpenApiSpecService
             }
         }
 
-        // Rebuild components. pathItems are always pruned by reachability; other
-        // buckets only when $pruneAll (otherwise kept verbatim).
+        // Rebuild components keeping only reachable entries.
         $pruned = [];
         foreach ($components as $type => $entries) {
-            if (! is_array($entries) || (! $pruneAll && $type !== 'pathItems')) {
+            if (! is_array($entries)) {
                 $pruned[$type] = $entries;
 
                 continue;
@@ -684,20 +681,19 @@ final class OpenApiSpecService
         $prefix = '#/components/pathItems/';
         $seen = [];
 
+        // Collect each link of the $ref chain as a precedence layer (closest
+        // first) WITHOUT its own $ref. Invariant: NO path-item $ref survives —
+        // a malformed / external / unsupported / cyclic ref is simply not
+        // followed, so the filtered response can never point at unfiltered (or
+        // pruning-reachable) content.
+        $layers = [];
         while (true) {
             $ref = $item['$ref'] ?? null;
-            if ($ref === null) {
-                break; // nothing left to resolve
-            }
-
-            // Invariant: NO path-item $ref survives the result. Always drop it —
-            // we either inline its components.pathItems target below, or discard
-            // a malformed / external / unsupported / cyclic ref so the filtered
-            // response can never point at unfiltered (or pruning-reachable) content.
             unset($item['$ref']);
+            $layers[] = $item;
 
             if (! is_string($ref) || ! str_starts_with($ref, $prefix)) {
-                break; // malformed or unsupported (external/non-pathItems) ref: dropped
+                break; // no further (resolvable path-item) ref
             }
 
             $name = substr($ref, strlen($prefix));
@@ -711,10 +707,13 @@ final class OpenApiSpecService
                 break; // unresolvable
             }
 
-            $item += $target; // already-merged (closer) keys win; target fills gaps
+            $item = $target;
         }
 
-        return $item;
+        // Merge once (no array union inside the loop): a closer layer wins, so
+        // reverse the list and let array_replace apply later (higher-precedence)
+        // layers last.
+        return array_replace(...array_reverse($layers));
     }
 
     /**
