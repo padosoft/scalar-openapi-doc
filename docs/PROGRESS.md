@@ -135,6 +135,11 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - **T5–T9**: Codex gates **only** on security/auth findings; merge on CI+local green otherwise (don't block on non-security nits).
 - **New final task (T10)**: at the very end, run a single deep Copilot review over the whole codebase as the last gate before release.
 
+### Macro PR #16 — later rounds (continued)
+- **`46acdab`→`543e1e9`:** verb-key heuristic too loose — a nested object named `get`/`post` (response/header/schema) treated as an operation; now gated on real `$pathItemContext` (paths/webhooks seeding walks each path item as a path-item position). Proactive sweep: `links`/`callbacks` inside a schema skipped. Pest 166/166.
+- **`543e1e9`→`f7641d8`:** anchor-owner scan walked schema components with `$inSchema=false`, bypassing the new guards — a `$anchor` in a schema `callbacks` annotation could keep a hidden schema. `collectAnchorNames` now takes `$inSchema` (true for `schemas`); swept all walk call sites for consistency. See LESSON `[security/parallel-walks-must-share-context]`. Pest 167/167, PHPStan max 0, Pint clean.
+- **Awaiting:** Codex review of `f7641d8`.
+
 ## T5 — task/scalar-proxy
 _Not started._
 
