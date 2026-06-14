@@ -634,6 +634,11 @@ final class OpenApiSpecService
      * configured upstream document — a sibling file ("./common.yaml#/…") or a
      * different host targets ANOTHER document, so its local-looking fragment must
      * NOT keep/resolve our local components.
+     *
+     * The fragment is PERCENT-DECODED (RFC 3986 fragments are percent-encoded), so
+     * a pointer written as "#%2Fpaths%2F~1admin%2Fget" is recognised as the local
+     * "/paths/~1admin/get" and not mistaken for an external ref. JSON Pointer "~0"/
+     * "~1" escapes are NOT percent-encoding and stay intact for callers to unescape.
      */
     private function localFragment(string $ref): ?string
     {
@@ -644,10 +649,10 @@ final class OpenApiSpecService
 
         $base = substr($ref, 0, $hash);
         if ($base === '') {
-            return substr($ref, $hash + 1); // pure fragment — same document
+            return rawurldecode(substr($ref, $hash + 1)); // pure fragment — same document
         }
 
-        return $this->refBaseIsCurrentDocument($base) ? substr($ref, $hash + 1) : null;
+        return $this->refBaseIsCurrentDocument($base) ? rawurldecode(substr($ref, $hash + 1)) : null;
     }
 
     /**

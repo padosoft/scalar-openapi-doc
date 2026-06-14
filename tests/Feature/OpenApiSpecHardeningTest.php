@@ -1887,6 +1887,58 @@ class OpenApiSpecHardeningTest extends TestCase
         expect($filtered['components'] ?? [])->not->toHaveKey('schemas');
     }
 
+    public function test_drops_link_with_percent_encoded_operationref_to_filtered_operation(): void
+    {
+        // A link whose operationRef is a PERCENT-ENCODED same-document JSON Pointer
+        // ("#%2Fpaths%2F~1admin%2Fget") targets the filtered-out /admin operation.
+        // It must be decoded, recognized as a local pointer, and dropped — not
+        // treated as external (which would leak the link + the /admin path name).
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toAdmin' => ['operationRef' => '#%2Fpaths%2F~1admin%2Fget'],
+                    ]]],
+                ]],
+                '/admin' => ['get' => ['tags' => ['Admin'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths'])->not->toHaveKey('/admin')
+            ->and($filtered['paths']['/a']['get']['responses']['200']['links'])->toBe([]);
+    }
+
+    public function test_keeps_link_with_percent_encoded_operationref_to_granted_operation(): void
+    {
+        // The same decoding must KEEP a link whose percent-encoded operationRef
+        // targets a SURVIVING operation, so decoding doesn't over-drop.
+        config(['openapi.upstream_url' => 'https://specs.example.com/openapi.json']);
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'paths' => [
+                '/a' => ['get' => [
+                    'tags' => ['Orders'],
+                    'operationId' => 'getA',
+                    'responses' => ['200' => ['description' => 'ok', 'links' => [
+                        'toB' => ['operationRef' => '#%2Fpaths%2F~1b%2Fget'],
+                    ]]],
+                ]],
+                '/b' => ['get' => ['tags' => ['Orders'], 'responses' => ['200' => ['description' => 'ok']]]],
+            ],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered['paths']['/a']['get']['responses']['200']['links'])->toHaveKey('toB');
+    }
+
     public function test_external_terminal_dot_ref_does_not_keep_local_component(): void
     {
         // RFC 3986 §5.2.4: a terminal "." leaves a trailing slash, so
