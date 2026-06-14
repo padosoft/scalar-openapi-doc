@@ -790,16 +790,25 @@ final class OpenApiSpecService
         if ($leadingSlash) {
             array_shift($segments); // drop the empty segment before the leading '/'
         }
+        $lastIndex = count($segments) - 1;
         $out = [];
-        foreach ($segments as $segment) {
+        foreach ($segments as $i => $segment) {
+            $isLast = $i === $lastIndex;
             if ($segment === '.') {
-                continue; // current-directory marker — drop
+                if ($isLast) {
+                    $out[] = ''; // terminal "." leaves a trailing slash (RFC 3986 §5.2.4)
+                }
+
+                continue; // otherwise the current-directory marker is dropped
             }
             if ($segment === '..') {
                 if ($out !== [] && end($out) !== '..') {
                     array_pop($out); // ascend (pops a name OR an empty segment)
                 } elseif (! $leadingSlash) {
                     $out[] = '..'; // relative path may keep a leading ".."
+                }
+                if ($isLast) {
+                    $out[] = ''; // terminal ".." also leaves a trailing slash
                 }
 
                 continue;
