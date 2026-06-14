@@ -716,10 +716,15 @@ final class OpenApiSpecService
     }
 
     /**
-     * Whether at least one surviving operation (in paths/webhooks) inherits the
-     * root `security` — i.e. lacks its own `security` key. An operation that
-     * declares `security` (including `security: []`, an explicit opt-out) does
-     * not inherit root; one without the key does.
+     * Whether at least one surviving operation inherits the root `security` —
+     * i.e. lacks its own `security` key. An operation that declares `security`
+     * (including `security: []`, an explicit opt-out) does not inherit root; one
+     * without the key does. This counts operations in paths/webhooks AND in their
+     * (and the components') callbacks/reusable path items, since a callback
+     * operation without `security` also inherits the API-wide requirement —
+     * dropping root security then would strip auth a callback still relies on.
+     * (Over-counting an unreachable component op only keeps root security around
+     * harmlessly; it never creates a dangling reference.)
      *
      * @param  array<array-key, mixed>  $spec
      */
@@ -727,8 +732,42 @@ final class OpenApiSpecService
     {
         foreach (['paths', 'webhooks'] as $container) {
             foreach ($this->asArray($spec[$container] ?? null) as $pathItem) {
-                foreach ($this->operations($pathItem) as $operation) {
-                    if (! array_key_exists('security', $operation)) {
+                if ($this->pathItemInheritsRootSecurity($pathItem)) {
+                    return true;
+                }
+            }
+        }
+
+        $components = $this->asArray($spec['components'] ?? null);
+        foreach ($this->asArray($components['pathItems'] ?? null) as $pathItem) {
+            if ($this->pathItemInheritsRootSecurity($pathItem)) {
+                return true;
+            }
+        }
+        foreach ($this->asArray($components['callbacks'] ?? null) as $callback) {
+            foreach ($this->asArray($callback) as $pathItem) {
+                if ($this->pathItemInheritsRootSecurity($pathItem)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a path item has any operation that inherits root `security` (no
+     * own `security` key), recursing through that operation's callbacks.
+     */
+    private function pathItemInheritsRootSecurity(mixed $pathItem): bool
+    {
+        foreach ($this->operations($pathItem) as $operation) {
+            if (! array_key_exists('security', $operation)) {
+                return true;
+            }
+            foreach ($this->asArray($operation['callbacks'] ?? null) as $callback) {
+                foreach ($this->asArray($callback) as $cbPathItem) {
+                    if ($this->pathItemInheritsRootSecurity($cbPathItem)) {
                         return true;
                     }
                 }

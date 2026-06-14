@@ -485,6 +485,32 @@ class OpenApiSpecHardeningTest extends TestCase
         expect(array_keys($filtered['components']['schemas']))->toBe(['Pet']);
     }
 
+    public function test_keeps_root_security_when_a_granted_callback_operation_inherits_it(): void
+    {
+        // The only surviving top-level op declares its own security, but its
+        // callback op has none -> it inherits root, so root security (and its
+        // scheme) must be kept, not dropped.
+        $spec = [
+            'openapi' => '3.1.0',
+            'info' => ['title' => 't', 'version' => '1'],
+            'security' => [['ApiKeyAuth' => []]],
+            'paths' => ['/order' => ['post' => [
+                'tags' => ['Orders'],
+                'security' => [['ApiKeyAuth' => []]],
+                'responses' => ['200' => ['description' => 'ok']],
+                'callbacks' => ['onEvent' => ['{$request.body#/id}' => ['post' => [
+                    'responses' => ['200' => ['description' => 'ack']],
+                ]]]],
+            ]]],
+            'components' => ['securitySchemes' => ['ApiKeyAuth' => ['type' => 'http', 'scheme' => 'bearer']]],
+        ];
+
+        $filtered = $this->service()->filterForUser($spec, collect(['Orders']), collect([]));
+
+        expect($filtered)->toHaveKey('security')
+            ->and(array_keys($filtered['components']['securitySchemes']))->toBe(['ApiKeyAuth']);
+    }
+
     public function test_keeps_security_scheme_used_only_by_a_granted_callback(): void
     {
         // A granted operation's callback operation declares security: [{CallbackAuth}].
