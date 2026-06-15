@@ -41,6 +41,10 @@ Guardrails are part of the deliverable, not an afterthought. Every subtask defin
 - **Vitest (TS)** — component logic (MultiSelect, DataTable, role-conditional nav, form behavior).
 - **Playwright (E2E)** — **mandatory for every UI/UX interaction introduced** (forms, dialogs, toasts, filters, pagination, role-based visibility, keyboard/a11y). A purely backend subtask skips Playwright; a subtask that touches any rendered interaction does not.
 - Tests run on SQLite `:memory:` + `CACHE_STORE=array`. Code must stay db/cache driver-agnostic (facades only; no Redis-only calls).
+- On auth/security-focused changes, lock in a regression baseline for:
+  - mutation CSRF failures (419),
+  - auth-related throttling/rate-limit behavior,
+  - auth event persistence (`login`, `logout`, `failed`) at route/action level.
 
 ## Definition of Done (per subtask)
 
