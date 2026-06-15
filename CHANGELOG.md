@@ -1,0 +1,66 @@
+# Changelog
+
+## v1.0.0 — 2026-06-15
+
+### Added
+- Bootstrap with Laravel 13 + Inertia 3 + React 19 + TypeScript + Tailwind 4 + shadcn/ui.
+- Authentication and RBAC foundation with Fortify + Spatie roles (`admin`, `user`) and seeded admin bootstrap.
+- Multi-tenant OpenAPI docs gateway:
+  - `/api-docs/openapi.json` proxy with server-side filtering.
+  - Union-style grants: users see operations by OR-logic over tags and endpoint IDs.
+  - `admin` can see full spec, regular users only granted operations.
+- Scalar docs page at `/scalar` behind role-based authorization.
+- Metadata endpoints for tag/endpoint administration:
+  - `/api-docs/meta/tags`
+  - `/api-docs/meta/endpoints`
+  - `/api-docs/flush-cache` (admin only).
+
+### Added Admin features
+- User management UI/API:
+  - create, edit, delete users.
+  - assign roles.
+  - assign per-user grants with anti-tampering validation (values must exist in the upstream spec).
+  - protect against removing the last admin / self-delete.
+- Server catalog CRUD (admin):
+  - add/edit/delete playground server entries.
+  - activate/deactivate servers injected into user-specific specs.
+- Auth logs panel (admin):
+  - immutable log rows for `login`, `logout`, `failed` events.
+  - filters and date-range exploration.
+- Cache control actions and maintenance command:
+  - UI flush cache action.
+  - `openapi:refresh` and cache eviction in app controller paths.
+
+### Security and hardening
+- Upstream spec fetch hardened:
+  - SSRF protections (`OPENAPI_ALLOWED_SCHEMES`, `OPENAPI_ALLOWED_HOSTS`).
+  - strict fetch result validation before cache write.
+  - stale-on-error fallback handling.
+- Spec filtering hardening:
+  - transitive component pruning for 3.1 structures (`paths`, `webhooks`, callbacks, schemas, refs).
+  - `Cache-Control: private, no-store` on filtered proxy output.
+  - no client-side authorization decisions (all enforced server-side).
+- Global auth hardening:
+  - CSRF baseline coverage on protected mutations.
+  - login rate limiting.
+  - mass-assignment protection on mutable models.
+  - auth audit trail kept immutable.
+- Playwright hardening polish:
+  - role-matrix checks.
+  - keyboard/a11y smoke (`Esc` dialogs, focus behavior).
+  - responsive/empty-state smoke tests.
+
+### Quality and release readiness
+- Full automated quality stack in place:
+  - `vendor/bin/pint --test`
+  - `vendor/bin/phpstan analyse --level=max`
+  - `php artisan test`
+  - `npm run test`
+  - `npm run build`
+  - `npx playwright test` (including full auth-flow scenarios)
+- GitHub release created: **v1.0.0**
+- Roadmap completed to 100% with T1–T9 delivered.
+
+### Notes
+- `npm audit` currently reports 7 issues in the transitive `esbuild`/`shell-quote` graph of the installed lockfile.
+  The project remains functional; remediation is planned for a future dependency refresh cycle.
