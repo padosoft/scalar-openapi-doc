@@ -13,6 +13,7 @@ use App\Services\OpenApiSpecService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -32,7 +33,7 @@ class UserController extends Controller
         return Inertia::render('admin/users/form', [
             'user' => null,
             'roles' => $this->allRoles(),
-            'openapi' => $this->serializeOpenApiCatalog($openApiSpecService),
+            'openapi' => $this->catalogOrEmpty($openApiSpecService),
         ]);
     }
 
@@ -70,7 +71,7 @@ class UserController extends Controller
                 ],
             ],
             'roles' => $this->allRoles(),
-            'openapi' => $this->serializeOpenApiCatalog($openApiSpecService),
+            'openapi' => $this->catalogOrEmpty($openApiSpecService),
         ]);
     }
 
@@ -215,8 +216,8 @@ class UserController extends Controller
 
     /**
      * @return array{
-     *     tags: list<array<string, string>>,
-     *     endpoints: list<array<string, string>>
+     *     tags: list<array{value: string, label: string}>,
+     *     endpoints: list<array{value: string, label: string}>
      * }
      */
     private function serializeOpenApiCatalog(OpenApiSpecService $service): array
@@ -247,6 +248,26 @@ class UserController extends Controller
             'tags' => $serializedTags,
             'endpoints' => $serializedEndpoints,
         ];
+    }
+
+    /**
+     * OpenAPI UI catalog is optional for UX: when upstream metadata is
+     * unavailable, render the form with empty grant options instead of failing
+     * the whole page (grants are still validated server-side).
+     *
+     * @return array{tags: list<array{value:string,label:string}>, endpoints: list<array{value:string,label:string}>}
+     */
+    private function catalogOrEmpty(OpenApiSpecService $service): array
+    {
+        try {
+            return $this->serializeOpenApiCatalog($service);
+        } catch (\Throwable $exception) {
+            Log::warning('Unable to load OpenAPI catalog for user grants UI', [
+                'exception' => $exception::class,
+            ]);
+
+            return ['tags' => [], 'endpoints' => []];
+        }
     }
 
     private function wouldDropLastAdmin(User $user, string $nextRole): bool

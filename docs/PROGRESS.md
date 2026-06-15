@@ -13,8 +13,8 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | T2 | Bootstrap (scaffold + tooling + CI) | `task/bootstrap` | 🟢 merged (PR #7 → `main`, `7738203`) | #7 |
 | T3 | RBAC & data model | `task/rbac-data-model` | 🟢 merged (macro PR #12 → `main`) | #12 |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | 🟢 merged (macro PR #16 → `main`, `d7b3b33`) | #16 |
-| T5 | Scalar proxy + dashboard | `task/scalar-proxy` | 🟡 in progress | — |
-| T6 | Admin users + grants | `task/admin-users` | ⚪ pending | — |
+| T5 | Scalar proxy + dashboard | `task/scalar-proxy` | 🟢 merged (PR #17 → `main`) | #17 |
+| T6 | Admin users + grants | `task/admin-users` | 🟡 in progress | — |
 | T7 | Servers + audit | `task/admin-servers-audit` | ⚪ pending | — |
 | T8 | Hardening & polish | `task/hardening-polish` | ⚪ pending | — |
 | T9 | Release | `task/release` | ⚪ pending | — |
@@ -201,12 +201,33 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
   - `npm run format:check` (clean)
 - Next action: push fix commit to `task/scalar-proxy`, rerun `gh pr checks`, then re-request and monitor Codex threads before merge.
 
+### 2026-06-15 — PR #17 merged
+- PR #17 has been merged into `main` at commit `70dd6bc8388f62905ad7a5a2ca500640bcf4ea15`.
+- CI checks at merge were all green and all Codex threads were already resolved (all `isResolved: true`).
+- T5 objectives are now satisfied on `main`: proxy endpoints, scalar page auth, server injection, cache flush action/command, admin-side APIs, dashboard auth-aware nav, shared UI components, Playwright + Pest/PHPStan/Pint gates.
+
+### RESUME HERE (T6 start)
+- New focus macro branch: `task/admin-users` (from `main`).
+- T6 objective: Admin user CRUD + anti-tampering grants + last-admin guard + Vitest + Playwright.
+
 ### Notes for T5 continuation
 - Added end-to-end UI assertion for role-conditional API Reference link visibility and `/scalar` usability in `tests/e2e/openapi-proxy.spec.ts` (admin login helper + sidebar link assertion + navigation).
 - CI now seeds `DatabaseSeeder` in Playwright job so role-based UI tests can authenticate as the seeded admin user.
 
 ## T6 — task/admin-users
-_Not started._
+Implementation is in `task/admin-users` on top of `main`, with anti-tampering and last-admin safety work underway:
+- Hardened user CRUD controller for resilience when the OpenAPI catalog is unavailable:
+  - `create` and `edit` now load grants catalog with a safe fallback (`openapi` UI options can be empty without blocking the page).
+  - Added defensive serialization for `openapi` tag/endpoint options with strict map shape.
+- Added feature tests for unknown grant anti-tampering on `grants.tags` and `grants.endpoints`.
+- Added Playwright coverage for users index/create/edit/delete UX flows using shared `DataTable`, `MultiSelect`, and `ConfirmDialog` components.
+- Local verification done on this branch:
+  - `vendor/bin/pint --test`
+  - `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max`
+  - `php artisan test` (green after the last run captured below)
+  - `npm run test`
+  - `npm run build`
+  - `npx playwright test`
 
 ## T7 — task/admin-servers-audit
 _Not started._

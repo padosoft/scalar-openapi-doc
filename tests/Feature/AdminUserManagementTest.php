@@ -78,6 +78,30 @@ class AdminUserManagementTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'bad@example.com']);
     }
 
+    public function test_admin_user_request_rejects_unknown_endpoint_grants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+        $admin = $this->createAdmin();
+
+        $response = $this->actingAs($admin)->post('/admin/users', [
+            'name' => 'Bad Endpoint User',
+            'email' => 'bad-endpoint@example.com',
+            'password' => 'password',
+            'role' => 'user',
+            'grants' => [
+                'tags' => ['Catalog'],
+                'endpoints' => ['GET /orders/{id}', 'DELETE /forbidden', 'not-a-grant'],
+            ],
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors([
+            'grants.endpoints.1',
+        ]);
+        $this->assertDatabaseMissing('users', ['email' => 'bad-endpoint@example.com']);
+    }
+
     public function test_admin_cannot_delete_the_last_administrator(): void
     {
         $admin = $this->createAdmin();
