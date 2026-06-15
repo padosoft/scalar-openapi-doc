@@ -42,6 +42,7 @@ class HandleInertiaRequests extends Middleware
         return [
             ...parent::share($request),
             'name' => config()->string('app.name'),
+            'csrf_token' => $request->session()->token(),
             'auth' => [
                 'user' => $user,
                 'canViewScalar' => (bool) $user?->can('viewScalar'),
