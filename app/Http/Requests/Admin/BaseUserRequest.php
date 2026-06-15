@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Admin;
 
+use App\Models\User;
+use App\Models\UserAllowedEndpoint;
 use App\Services\OpenApiSpecService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -105,21 +107,66 @@ abstract class BaseUserRequest extends FormRequest
      */
     protected function grantRules(): array
     {
+        $allowedTags = $this->grantableTags();
+        $allowedEndpoints = $this->grantableEndpoints();
+
+        if ($allowedTags === []) {
+            $allowedTags = array_values(array_unique(array_merge($allowedTags, $this->existingGrantedTags())));
+        }
+
+        if ($allowedEndpoints === []) {
+            $allowedEndpoints = array_values(array_unique(
+                array_merge($allowedEndpoints, $this->existingGrantedEndpointKeys()),
+            ));
+        }
+
         return [
             'grants' => ['array'],
             'grants.tags' => ['array'],
             'grants.tags.*' => [
                 'string',
                 'max:255',
-                Rule::in($this->grantableTags()),
+                Rule::in($allowedTags),
             ],
             'grants.endpoints' => ['array'],
             'grants.endpoints.*' => [
                 'string',
                 'max:255',
-                Rule::in($this->grantableEndpoints()),
+                Rule::in($allowedEndpoints),
             ],
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function existingGrantedTags(): array
+    {
+        $user = $this->route('user');
+        if (! $user instanceof User) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            $user->allowedTags->pluck('tag')->all(),
+            static fn (mixed $tag): bool => is_string($tag),
+        ));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function existingGrantedEndpointKeys(): array
+    {
+        $user = $this->route('user');
+        if (! $user instanceof User) {
+            return [];
+        }
+
+        return array_values(array_map(
+            static fn (UserAllowedEndpoint $endpoint): string => $endpoint->method->value.' '.$endpoint->path,
+            $user->allowedEndpoints->all(),
+        ));
     }
 
     /**

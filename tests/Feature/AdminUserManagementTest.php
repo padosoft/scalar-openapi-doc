@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature;
 
+use App\Enums\HttpVerb;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -76,6 +78,82 @@ class AdminUserManagementTest extends TestCase
             'grants.tags.0',
         ]);
         $this->assertDatabaseMissing('users', ['email' => 'bad@example.com']);
+    }
+
+    public function test_admin_user_request_rejects_unknown_endpoint_grants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+        $admin = $this->createAdmin();
+
+        $response = $this->actingAs($admin)->post('/admin/users', [
+            'name' => 'Bad Endpoint User',
+            'email' => 'bad-endpoint@example.com',
+            'password' => 'password',
+            'role' => 'user',
+            'grants' => [
+                'tags' => ['Catalog'],
+                'endpoints' => ['GET /orders/{id}', 'DELETE /forbidden', 'not-a-grant'],
+            ],
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors([
+            'grants.endpoints.1',
+        ]);
+        $this->assertDatabaseMissing('users', ['email' => 'bad-endpoint@example.com']);
+    }
+
+    public function test_admin_can_update_user_with_existing_grants_when_openapi_catalog_is_unavailable(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $admin = $this->createAdmin();
+
+        $cacheKey = 'admin-users-openapi-availability-test';
+        $cacheStale = "{$cacheKey}-stale";
+        config([
+            'openapi.cache_key' => $cacheKey,
+            'openapi.stale_key' => $cacheStale,
+            'openapi.upstream_url' => 'http://127.0.0.1:1/openapi.json',
+            'openapi.allowed_hosts' => ['127.0.0.1'],
+            'openapi.allowed_schemes' => ['http'],
+        ]);
+        Cache::forget($cacheKey);
+        Cache::forget($cacheStale);
+
+        Http::fake(['http://127.0.0.1:1/openapi.json' => Http::response([], 500)]);
+
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $user->allowedTags()->create(['tag' => 'Catalog']);
+        $user->allowedEndpoints()->create([
+            'method' => HttpVerb::Get,
+            'path' => '/orders/{id}',
+        ]);
+
+        $response = $this->actingAs($admin)->from('/admin/users/'.$user->id.'/edit')->put(
+            '/admin/users/'.$user->id,
+            [
+                'name' => 'Updated user',
+                'email' => $user->email,
+                'password' => '',
+                'role' => 'user',
+                'grants' => [
+                    'tags' => ['Catalog'],
+                    'endpoints' => ['GET /orders/{id}'],
+                ],
+            ],
+        );
+
+        $response->assertRedirect('/admin/users');
+        $response->assertSessionDoesntHaveErrors();
+
+        $user->refresh();
+        $this->assertSame('Updated user', $user->name);
+        $this->assertSame(['Catalog'], $user->allowedTags->pluck('tag')->all());
+        $this->assertSame(['GET /orders/{id}'], $user->allowedEndpoints->map(
+            fn ($endpoint): string => $endpoint->method->value.' '.$endpoint->path
+        )->all());
     }
 
     public function test_admin_cannot_delete_the_last_administrator(): void
