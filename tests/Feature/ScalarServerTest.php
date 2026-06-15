@@ -87,13 +87,34 @@ final class ScalarServerTest extends TestCase
         $viewerRole = $this->viewerRole();
         $user->assignRole($viewerRole);
 
-        $this->actingAs($user)
+        $server = ScalarServer::query()->create([
+            'url' => 'https://unmanaged.local',
+            'description' => 'Unmanaged',
+            'sort_order' => 5,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user);
+        $response->get('/servers')->assertForbidden();
+        $response->get('/servers/create')->assertForbidden();
+        $response->get("/servers/{$server->id}/edit")->assertForbidden();
+
+        $response
             ->post('/servers', [
                 'url' => 'https://forbidden.local',
                 'sort_order' => 0,
                 'is_active' => true,
             ])
             ->assertForbidden();
+        $response
+            ->put("/servers/{$server->id}", [
+                'url' => $server->url,
+                'description' => 'Blocked',
+                'sort_order' => 10,
+                'is_active' => false,
+            ])
+            ->assertForbidden();
+        $response->delete("/servers/{$server->id}")->assertForbidden();
     }
 
     private function createAdmin(): User

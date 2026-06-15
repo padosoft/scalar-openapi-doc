@@ -14,8 +14,8 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | T3 | RBAC & data model | `task/rbac-data-model` | 🟢 merged (macro PR #12 → `main`) | #12 |
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | 🟢 merged (macro PR #16 → `main`, `d7b3b33`) | #16 |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | 🟢 merged (PR #17 → `main`) | #17 |
-| T6 | Admin users + grants | `task/admin-users` | 🟡 in progress | — |
-| T7 | Servers + audit | `task/admin-servers-audit` | ⚪ pending | — |
+| T6 | Admin users + grants | `task/admin-users` | 🟢 merged (macro PR #18 → `main`) | #18 |
+| T7 | Servers + audit | `task/admin-servers-audit` | 🟡 in progress | — |
 | T8 | Hardening & polish | `task/hardening-polish` | ⚪ pending | — |
 | T9 | Release | `task/release` | ⚪ pending | — |
 
@@ -235,10 +235,34 @@ Implementation is in `task/admin-users` on top of `main`, with anti-tampering an
   - allowing fallback user grants in validation allow-lists when catalog extraction fails.
 - Added regression coverage for update during catalog outage.
 - Re-ran full local gate set successfully (`pint`, `phpstan`, `php artisan test` 208, `vitest`, `build`, `playwright`).
-- PR #18 ready for Codex re-nudge and merge once `requested_reviewers` includes an active reviewer and CI remains green.
+- PR #18 merged into `main` at commit `b3535f8`.
+
+### 2026-06-15 — milestone
+- T6 is complete; next task focus remains T7 (`task/admin-servers-audit`), with the macro state now `🟢` in the tracker.
 
 ## T7 — task/admin-servers-audit
-_Not started._
+### Implementation completed on `task/admin-servers-audit`
+- Added feature coverage for auth-log auditing and hardening:
+  - `tests/Feature/AuthLogTest.php`
+    - verifies auth listeners persist `login`, `logout`, and `failed` rows;
+    - verifies admin-only access + read-only route behavior for `/auth-logs`;
+    - verifies `admin` scope/filters on the index and prune-command behavior.
+  - extended `tests/Feature/ScalarServerTest.php` to assert non-admins are forbidden on all CRUD routes (`GET`, `POST`, `PUT`, `DELETE`).
+- Added Playwright coverage for server/user audit UI flows:
+  - `tests/e2e/admin-servers-authlogs.spec.ts`
+    - admin CRUD flow for scalar servers (create, edit, delete with confirmation);
+    - auth logs page render + filter controls and absence of destructive actions.
+- Local gates:
+  - `vendor/bin/pint --test` (green)
+  - `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max` (0 errors)
+  - `php artisan test` (211 passed)
+  - `npm run test` (13 passed)
+  - `npm run build`
+  - `php artisan db:seed --class=DatabaseSeeder --force` (Playwright prerequisite)
+  - `npx playwright test` (9 passed)
+
+### 2026-06-15 — PR TBD (task/admin-servers-audit)
+- Awaiting: open PR for review and Codex merge. No review threads yet.
 
 ## T8 — task/hardening-polish
 _Not started._
