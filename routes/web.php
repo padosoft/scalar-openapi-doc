@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Admin\AuthLogController;
+use App\Http\Controllers\Admin\OpenApiCacheController;
+use App\Http\Controllers\Admin\ScalarServerController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\OpenApiDocsController;
 use Illuminate\Support\Facades\Route;
@@ -18,6 +21,19 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('admin/users/{user}/edit', [AdminUserController::class, 'edit'])->name('admin.users.edit');
         Route::put('admin/users/{user}', [AdminUserController::class, 'update'])->name('admin.users.update');
         Route::delete('admin/users/{user}', [AdminUserController::class, 'destroy'])->name('admin.users.destroy');
+
+        Route::get('openapi-cache', [OpenApiCacheController::class, 'index']);
+        Route::delete('openapi-cache', [OpenApiCacheController::class, 'destroy']);
+
+        Route::get('servers', [ScalarServerController::class, 'index'])->name('admin.servers.index');
+        Route::get('servers/create', [ScalarServerController::class, 'create'])->name('admin.servers.create');
+        Route::post('servers', [ScalarServerController::class, 'store'])->name('admin.servers.store');
+        Route::get('servers/{server}/edit', [ScalarServerController::class, 'edit'])->name('admin.servers.edit');
+        Route::put('servers/{server}', [ScalarServerController::class, 'update'])->name('admin.servers.update');
+        Route::delete('servers/{server}', [ScalarServerController::class, 'destroy'])->name('admin.servers.destroy');
+
+        Route::get('auth-logs', [AuthLogController::class, 'index'])->name('admin.auth-logs.index');
+
     });
 });
 
@@ -30,7 +46,7 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         )->group(function (): void {
             Route::get('meta/tags', [OpenApiDocsController::class, 'metaTags']);
             Route::get('meta/endpoints', [OpenApiDocsController::class, 'metaEndpoints']);
-            Route::post('flush-cache', [OpenApiDocsController::class, 'flushCache']);
+            Route::match(['post', 'delete'], 'flush-cache', [OpenApiCacheController::class, 'destroy'])->name('api-docs.flush-cache');
         });
     });
 });

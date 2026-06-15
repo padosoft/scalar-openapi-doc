@@ -98,11 +98,14 @@ class OpenApiDocsTest extends TestCase
 
         $admin = User::factory()->create();
         $admin->assignRole($adminRole);
-
-        $tags = $this->actingAs($admin)->get('/api-docs/meta/tags')->json();
+        $tagsResponse = $this->actingAs($admin)->get('/api-docs/meta/tags');
+        $tagsResponse->assertOk();
+        $tags = $tagsResponse->json();
         $this->assertSame(['Admin', 'Catalog'], $tags);
 
-        $endpoints = $this->actingAs($admin)->get('/api-docs/meta/endpoints')->json();
+        $endpointsResponse = $this->actingAs($admin)->get('/api-docs/meta/endpoints');
+        $endpointsResponse->assertOk();
+        $endpoints = $endpointsResponse->json();
         $this->assertContains([
             'method' => 'GET',
             'path' => '/orders/{id}',
@@ -117,7 +120,7 @@ class OpenApiDocsTest extends TestCase
         Cache::put(config('openapi.cache_key'), ['openapi' => '3.1.0', 'info' => ['title' => 'A', 'version' => '1']], 3600);
         Cache::forever(config('openapi.stale_key'), ['openapi' => '3.1.0', 'info' => ['title' => 'B', 'version' => '1']]);
 
-        $flushResponse = $this->actingAs($admin)->post('/api-docs/flush-cache');
+        $flushResponse = $this->actingAs($admin)->delete('/api-docs/flush-cache');
         $flushResponse->assertOk();
         $flushResponse->assertJson(['status' => 'cleared']);
         $this->assertFalse(Cache::has(config('openapi.cache_key')));
@@ -131,7 +134,7 @@ class OpenApiDocsTest extends TestCase
         $user->assignRole($this->viewerRole());
 
         $this->actingAs($user)->get('/api-docs/meta/tags')->assertForbidden();
-        $this->actingAs($user)->post('/api-docs/flush-cache')->assertForbidden();
+        $this->actingAs($user)->delete('/api-docs/flush-cache')->assertForbidden();
     }
 
     private function viewerRole(): string
@@ -142,7 +145,10 @@ class OpenApiDocsTest extends TestCase
             static fn (mixed $role): bool => is_string($role) && trim($role) !== '' && trim($role) !== $adminRole,
         ));
         if ($viewerRoles !== []) {
-            return (string) $viewerRoles[0];
+            $viewerRole = (string) $viewerRoles[0];
+            Role::findOrCreate($viewerRole, (string) config('auth.defaults.guard', 'web'));
+
+            return $viewerRole;
         }
 
         $fallbackRole = 'viewer';

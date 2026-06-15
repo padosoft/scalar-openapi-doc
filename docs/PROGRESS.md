@@ -154,10 +154,11 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 
 ### ▶ RESUME HERE (next session)
 - T4 completed (PR #16 merged into `main`, `d7b3b33`, CI + Codex green).
-- T5 (`task/scalar-proxy`) currently in progress on this branch.
+- T4 note: `reviewThreads(last:100)` on PR #16 currently reports one unresolved non-outdated Codex thread (historical item, because the PR is already merged); no active merge gate remains on this repo state.
+- T5 (`task/scalar-proxy`) currently in progress on this branch, ready for PR.
 
 ## T5 — task/scalar-proxy
-### Subtask 5.1 — scalar proxy foundation (in progress)
+### Subtask 5.1 — scalar proxy foundation (completed)
 - Added Scalar proxy endpoints:
   - `/api-docs/openapi.json` behind `auth`, `verified`, `can:viewScalar`.
   - `/api-docs/meta/tags`, `/api-docs/meta/endpoints`, `/api-docs/flush-cache` behind admin role.
@@ -166,17 +167,18 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
 - Added `AppServiceProvider` `viewScalar` gate from `openapi.admin_role` and `openapi.viewer_roles`.
 - Updated shared Inertia props to expose `auth.canViewScalar` and `auth.isAdmin` to prevent client-side auth inference.
 - Dashboard sidebar now renders API Reference only when `auth.canViewScalar` is true.
-- Added first UI interaction coverage in Playwright (`/scalar` auth-gated redirect).
+- Added first UI interaction coverage in Playwright (`/scalar` auth-gated redirect, role-conditional sidebar visibility, admin API pages load).
 - Added feature coverage for proxy auth/metadata/flush behavior and server injection.
 - Resolved Laravel/React typing issues in user-controller/request validation path (`phpstan` strict mode), including endpoint/tag payload normalization and `Stringable` rule typing.
 - Fixed build regression in users form (`InputError` default export import).
+- Added admin `scalar_servers`/auth log controllers/pages plus cache flushing command wiring.
 - Local gates are green again on this checkpoint:
   - `vendor/bin/pint --test`
   - `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max`
-  - `php artisan test` (203 passed)
+  - `php artisan test` (206 passed)
   - `npm run test` (13 passed)
   - `npm run build`
-  - `npx playwright test tests/e2e/openapi-proxy.spec.ts` (4 passed)
+  - `npx playwright test` (5 passed)
 
 ### Notes for T5 continuation
 - Added end-to-end UI assertion for role-conditional API Reference link visibility and `/scalar` usability in `tests/e2e/openapi-proxy.spec.ts` (admin login helper + sidebar link assertion + navigation).

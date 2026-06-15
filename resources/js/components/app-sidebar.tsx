@@ -1,5 +1,5 @@
 import { Link, usePage } from '@inertiajs/react';
-import { BookOpen, FolderGit2, LayoutGrid, Shield } from 'lucide-react';
+import { BookOpen, Database, FolderGit2, LayoutGrid, Logs, MonitorDot, Shield } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
@@ -54,6 +54,21 @@ export function AppSidebar() {
             title: 'Users',
             href: '/admin/users',
             icon: Shield,
+        });
+        navItems.push({
+            title: 'Servers',
+            href: '/servers',
+            icon: MonitorDot,
+        });
+        navItems.push({
+            title: 'Auth Logs',
+            href: '/auth-logs',
+            icon: Logs,
+        });
+        navItems.push({
+            title: 'OpenAPI Cache',
+            href: '/openapi-cache',
+            icon: Database,
         });
     }
 
