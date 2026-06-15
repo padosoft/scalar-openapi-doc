@@ -26,8 +26,15 @@ export default defineConfig({
     ],
     webServer: {
         command: `php artisan serve --port=${PORT}`,
+        env: {
+            ...process.env,
+            OPENAPI_LOGIN_RATE_LIMIT_ATTEMPTS:
+                process.env.E2E_LOGIN_RATE_LIMIT_ATTEMPTS
+                ?? process.env.OPENAPI_LOGIN_RATE_LIMIT_ATTEMPTS
+                ?? '100',
+        },
         url: baseURL,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
         timeout: 120_000,
     },
 });
