@@ -229,6 +229,14 @@ Implementation is in `task/admin-users` on top of `main`, with anti-tampering an
   - `npm run build`
   - `npx playwright test`
 
+### 2026-06-15 — PR #18 (task/admin-users)
+- 3 Codex threads on PR #18 were resolved (including one outdated thread) after:
+  - including user fallback grants in catalog rendering so existing selections stay visible when OpenAPI metadata is unavailable;
+  - allowing fallback user grants in validation allow-lists when catalog extraction fails.
+- Added regression coverage for update during catalog outage.
+- Re-ran full local gate set successfully (`pint`, `phpstan`, `php artisan test` 208, `vitest`, `build`, `playwright`).
+- PR #18 ready for Codex re-nudge and merge once `requested_reviewers` includes an active reviewer and CI remains green.
+
 ## T7 — task/admin-servers-audit
 _Not started._
 

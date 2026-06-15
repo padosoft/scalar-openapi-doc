@@ -59,7 +59,9 @@ test('Admin can edit then delete a user', async ({ page }) => {
     await expect(updatedRow.getByText('To Remove Edited')).toBeVisible();
 
     await updatedRow.getByRole('button', { name: 'Delete' }).click();
-    const confirmButton = page.getByRole('button', { name: 'Confirm' }).first();
+    const confirmDialog = page.getByRole('dialog', { name: 'Delete user' });
+    await expect(confirmDialog).toBeVisible();
+    const confirmButton = confirmDialog.getByRole('button', { name: 'Confirm' });
     await expect(confirmButton).toBeVisible();
     await confirmButton.click({ force: true });
 

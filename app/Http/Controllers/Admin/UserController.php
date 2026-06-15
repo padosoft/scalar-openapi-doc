@@ -71,7 +71,7 @@ class UserController extends Controller
                 ],
             ],
             'roles' => $this->allRoles(),
-            'openapi' => $this->catalogOrEmpty($openApiSpecService),
+            'openapi' => $this->catalogOrEmpty($openApiSpecService, $user),
         ]);
     }
 
@@ -251,22 +251,93 @@ class UserController extends Controller
     }
 
     /**
+     * @param  list<array{value: string, label: string}>  $left
+     * @param  list<array{value: string, label: string}>  $right
+     * @return list<array{value: string, label: string}>
+     */
+    private function mergeCatalogOptions(array $left, array $right): array
+    {
+        $options = [];
+        $seen = [];
+
+        foreach ([$left, $right] as $collection) {
+            foreach ($collection as $option) {
+                $value = (string) $option['value'];
+                if (isset($seen[$value])) {
+                    continue;
+                }
+
+                $options[] = [
+                    'value' => $value,
+                    'label' => (string) $option['label'],
+                ];
+                $seen[$value] = true;
+            }
+        }
+
+        return $options;
+    }
+
+    /**
+     * @return array{tags: list<array{value: string, label: string}>, endpoints: list<array{value: string, label: string}>}
+     */
+    private function userGrantCatalog(?User $user): array
+    {
+        if (! $user instanceof User) {
+            return ['tags' => [], 'endpoints' => []];
+        }
+
+        $tagOptions = [];
+        $seenTags = [];
+        foreach ($user->allowedTags->pluck('tag')->all() as $tag) {
+            if (! is_string($tag) || isset($seenTags[$tag])) {
+                continue;
+            }
+
+            $seenTags[$tag] = true;
+            $tagOptions[] = [
+                'value' => $tag,
+                'label' => $tag,
+            ];
+        }
+
+        $endpointOptions = [];
+        foreach ($user->allowedEndpoints as $endpoint) {
+            $endpointOptions[] = [
+                'value' => $endpoint->method->value.' '.$endpoint->path,
+                'label' => $endpoint->method->value.' '.$endpoint->path,
+            ];
+        }
+
+        return [
+            'tags' => $tagOptions,
+            'endpoints' => $endpointOptions,
+        ];
+    }
+
+    /**
      * OpenAPI UI catalog is optional for UX: when upstream metadata is
      * unavailable, render the form with empty grant options instead of failing
      * the whole page (grants are still validated server-side).
      *
      * @return array{tags: list<array{value:string,label:string}>, endpoints: list<array{value:string,label:string}>}
      */
-    private function catalogOrEmpty(OpenApiSpecService $service): array
+    private function catalogOrEmpty(OpenApiSpecService $service, ?User $user = null): array
     {
         try {
-            return $this->serializeOpenApiCatalog($service);
+            $catalog = $this->serializeOpenApiCatalog($service);
+            $userCatalog = $this->userGrantCatalog($user);
+
+            return [
+                'tags' => $this->mergeCatalogOptions($catalog['tags'], $userCatalog['tags']),
+                'endpoints' => $this->mergeCatalogOptions($catalog['endpoints'], $userCatalog['endpoints']),
+            ];
         } catch (\Throwable $exception) {
             Log::warning('Unable to load OpenAPI catalog for user grants UI', [
                 'exception' => $exception::class,
             ]);
 
-            return ['tags' => [], 'endpoints' => []];
+            return $this->userGrantCatalog($user);
         }
     }
 
