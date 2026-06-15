@@ -89,6 +89,10 @@ return [
     'cache_ttl' => (int) env('OPENAPI_CACHE_TTL', 3600),
     'cache_key' => 'openapi:spec:raw',
     'stale_key' => 'openapi:spec:stale',
+    'login_rate_limit_attempts' => (int) env(
+        'OPENAPI_LOGIN_RATE_LIMIT_ATTEMPTS',
+        env('E2E_LOGIN_RATE_LIMIT_ATTEMPTS', 5),
+    ),
 
     /*
     |--------------------------------------------------------------------------
