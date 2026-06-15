@@ -8,9 +8,8 @@ use App\Actions\LogAuthEventAction;
 use App\Enums\AuthEvent;
 use App\Models\User;
 use Illuminate\Auth\Events\Failed;
-use Illuminate\Contracts\Queue\ShouldQueue;
 
-final class LogFailedLogin implements ShouldQueue
+final class LogFailedLogin
 {
     public function __construct(private readonly LogAuthEventAction $logAuthEvent) {}
 

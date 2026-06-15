@@ -34,7 +34,7 @@ export function DataTable<T>({
     return (
         <div className="overflow-x-auto rounded-md border">
             <table className="w-full text-sm">
-                <thead className="bg-muted/50 border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <thead className="border-b bg-muted/50 text-left text-xs tracking-wide text-muted-foreground uppercase">
                     <tr>
                         {columns.map((column) => (
                             <th
@@ -73,4 +73,3 @@ export function DataTable<T>({
         </div>
     );
 }
-

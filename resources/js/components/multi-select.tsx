@@ -23,7 +23,8 @@ export function MultiSelect({
     emptyLabel = 'No items selected',
     id,
 }: MultiSelectProps) {
-    const controlId = id ?? useId();
+    const fallbackId = useId();
+    const controlId = id ?? fallbackId;
     const [open, setOpen] = useState(false);
 
     return (
@@ -70,9 +71,13 @@ export function MultiSelect({
                                                 isChecked
                                                     ? selected.filter(
                                                           (value) =>
-                                                              value !== option.value,
+                                                              value !==
+                                                              option.value,
                                                       )
-                                                    : [...selected, option.value],
+                                                    : [
+                                                          ...selected,
+                                                          option.value,
+                                                      ],
                                             )
                                         }
                                     />
@@ -86,4 +91,3 @@ export function MultiSelect({
         </div>
     );
 }
-

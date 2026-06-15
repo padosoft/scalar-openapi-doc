@@ -1,9 +1,9 @@
 import { Head, router, usePage } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 import { DataTable } from '@/components/data-table';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
 
 type AuthLogRow = {
     id: number;
@@ -106,7 +106,11 @@ export default function AdminAuthLogs() {
                         </select>
                     </div>
 
-                    <Button type="button" className="self-end" onClick={applyFilters}>
+                    <Button
+                        type="button"
+                        className="self-end"
+                        onClick={applyFilters}
+                    >
                         Apply
                     </Button>
 
@@ -139,7 +143,8 @@ export default function AdminAuthLogs() {
                         {
                             key: 'user_id',
                             label: 'User',
-                            render: (row: AuthLogRow) => (row.user_id === null ? '—' : row.user_id),
+                            render: (row: AuthLogRow) =>
+                                row.user_id === null ? '—' : row.user_id,
                         },
                         {
                             key: 'ip_address',

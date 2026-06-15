@@ -1,8 +1,8 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { Button } from '@/components/ui/button';
+import { Head } from '@inertiajs/react';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { DataTable } from '@/components/data-table';
-import { Head } from '@inertiajs/react';
+import { Button } from '@/components/ui/button';
 
 type ServerRow = {
     id: number;
@@ -67,7 +67,8 @@ export default function AdminServersIndex() {
                 <div>
                     <h1 className="text-2xl font-semibold">Servers</h1>
                     <p className="text-sm text-muted-foreground">
-                        Manage playground server URLs injected into the OpenAPI spec.
+                        Manage playground server URLs injected into the OpenAPI
+                        spec.
                     </p>
                 </div>
                 <Button asChild>

@@ -1,8 +1,8 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { Button } from '@/components/ui/button';
-import { DataTable } from '@/components/data-table';
-import { ConfirmDialog } from '@/components/confirm-dialog';
 import { Head } from '@inertiajs/react';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { DataTable } from '@/components/data-table';
+import { Button } from '@/components/ui/button';
 
 type AdminUserRow = {
     id: number;

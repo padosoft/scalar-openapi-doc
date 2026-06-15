@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import {
     Dialog,
     DialogClose,
@@ -10,7 +11,6 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 
 type ConfirmDialogProps = {
     title: string;
@@ -45,7 +45,7 @@ export function ConfirmDialog({
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>{title}</DialogTitle>
-                    <DialogDescription className="text-muted-foreground text-sm">
+                    <DialogDescription className="text-sm text-muted-foreground">
                         {description}
                     </DialogDescription>
                 </DialogHeader>

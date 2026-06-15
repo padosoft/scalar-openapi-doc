@@ -33,10 +33,15 @@ describe('MultiSelect', () => {
             />,
         );
 
-        fireEvent.click(screen.getByRole('button', { name: 'Granted endpoints' }));
+        fireEvent.click(
+            screen.getByRole('button', { name: 'Granted endpoints' }),
+        );
         expect(screen.getByText('POST /orders')).toBeInTheDocument();
         fireEvent.click(screen.getByLabelText('POST /orders'));
-        expect(onChange).toHaveBeenLastCalledWith(['GET /orders', 'POST /orders']);
+        expect(onChange).toHaveBeenLastCalledWith([
+            'GET /orders',
+            'POST /orders',
+        ]);
         fireEvent.click(screen.getByLabelText('GET /orders'));
         expect(onChange).toHaveBeenLastCalledWith([]);
     });

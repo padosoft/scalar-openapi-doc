@@ -1,9 +1,9 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
+import InputError from '@/components/input-error';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import InputError from '@/components/input-error';
 
 type ServerPayload = {
     id?: number;
@@ -33,6 +33,7 @@ export default function AdminServersForm() {
 
         if (isEdit) {
             form.put(`/servers/${server?.id}`);
+
             return;
         }
 
@@ -53,7 +54,9 @@ export default function AdminServersForm() {
                         id="url"
                         name="url"
                         value={form.data.url}
-                        onChange={(event) => form.setData('url', event.currentTarget.value)}
+                        onChange={(event) =>
+                            form.setData('url', event.currentTarget.value)
+                        }
                         required
                     />
                     <InputError message={form.errors.url} />
@@ -65,7 +68,12 @@ export default function AdminServersForm() {
                         id="description"
                         name="description"
                         value={form.data.description}
-                        onChange={(event) => form.setData('description', event.currentTarget.value)}
+                        onChange={(event) =>
+                            form.setData(
+                                'description',
+                                event.currentTarget.value,
+                            )
+                        }
                     />
                     <InputError message={form.errors.description} />
                 </div>
@@ -79,7 +87,10 @@ export default function AdminServersForm() {
                         min={0}
                         value={form.data.sort_order}
                         onChange={(event) =>
-                            form.setData('sort_order', Number(event.currentTarget.value))
+                            form.setData(
+                                'sort_order',
+                                Number(event.currentTarget.value),
+                            )
                         }
                         required
                     />

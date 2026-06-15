@@ -1,18 +1,38 @@
-import { router } from '@inertiajs/react';
-import { Button } from '@/components/ui/button';
 import { Head } from '@inertiajs/react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 
 export default function OpenApiCachePage() {
-    const clearCache = (): void => {
-        router.delete('/openapi-cache', {
-            onSuccess: () => {
-                toast.success('OpenAPI cache cleared');
-            },
-            onError: () => {
-                toast.error('Failed to clear cache');
+    const clearCache = async (): Promise<void> => {
+        const csrfToken = document
+            .querySelector('meta[name="csrf-token"]')
+            ?.getAttribute('content');
+
+        if (!csrfToken) {
+            toast.error('Unable to find CSRF token');
+
+            return;
+        }
+
+        const response = await fetch('/openapi-cache', {
+            method: 'DELETE',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest',
+                Accept: 'application/json',
             },
         });
+
+        if (!response.ok) {
+            toast.error('Failed to clear cache');
+
+            return;
+        }
+
+        await response.json();
+        toast.success('OpenAPI cache cleared');
     };
 
     return (
@@ -27,7 +47,11 @@ export default function OpenApiCachePage() {
                     </p>
                 </div>
 
-                <Button type="button" variant="destructive" onClick={clearCache}>
+                <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={clearCache}
+                >
                     Flush cache
                 </Button>
             </section>

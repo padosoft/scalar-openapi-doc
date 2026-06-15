@@ -180,6 +180,27 @@ Full Codex re-review of the whole T4 core. Multiple adversarial rounds hardening
   - `npm run build`
   - `npx playwright test` (5 passed)
 
+### 2026-06-15 — PR #17 codex-thread stabilization
+- PR #17 (T5) had 4 open unresolved Codex threads on paths:
+  - `app/Listeners/LogFailedLogin.php`
+  - `resources/js/pages/admin/users/form.tsx`
+  - `resources/js/pages/admin/openapi-cache.tsx`
+  - `app/Http/Controllers/Admin/AuthLogController.php`
+- Actions completed on branch `task/scalar-proxy`:
+  - Removed queueing from `LogFailedLogin` to avoid serializing failed credentials in queue payloads.
+  - Fixed nested grants form updates by replacing `form.data.grants` as a full nested object instead of dot-path mutation.
+  - Switched cache-flush UI call to a native `fetch` with CSRF headers so JSON response stays API-safe.
+  - Fixed auth-logs Inertia render target to `admin/auth-logs/index`.
+- Re-ran local gates after these fixes:
+  - `vendor/bin/pint --test`
+  - `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max`
+  - `php artisan test` (206 passed)
+  - `npm run test` (13 passed)
+  - `npm run build`
+  - `npx playwright test` (5 passed)
+  - `npm run format:check` (clean)
+- Next action: push fix commit to `task/scalar-proxy`, rerun `gh pr checks`, then re-request and monitor Codex threads before merge.
+
 ### Notes for T5 continuation
 - Added end-to-end UI assertion for role-conditional API Reference link visibility and `/scalar` usability in `tests/e2e/openapi-proxy.spec.ts` (admin login helper + sidebar link assertion + navigation).
 - CI now seeds `DatabaseSeeder` in Playwright job so role-based UI tests can authenticate as the seeded admin user.

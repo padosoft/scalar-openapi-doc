@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { DataTable } from '@/components/data-table';
 
@@ -64,4 +64,3 @@ describe('DataTable', () => {
         expect(screen.queryByText('clara')).not.toBeInTheDocument();
     });
 });
-

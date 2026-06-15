@@ -1,5 +1,13 @@
 import { Link, usePage } from '@inertiajs/react';
-import { BookOpen, Database, FolderGit2, LayoutGrid, Logs, MonitorDot, Shield } from 'lucide-react';
+import {
+    BookOpen,
+    Database,
+    FolderGit2,
+    LayoutGrid,
+    Logs,
+    MonitorDot,
+    Shield,
+} from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';

@@ -56,7 +56,7 @@ final class AuthLogController extends Controller
 
         $events = array_map(static fn (AuthEvent $item): string => $item->value, AuthEvent::cases());
 
-        return Inertia::render('admin/auth-logs', [
+        return Inertia::render('admin/auth-logs/index', [
             'rows' => $rows,
             'events' => $events,
             'filters' => [

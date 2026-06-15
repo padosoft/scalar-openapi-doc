@@ -39,8 +39,11 @@ describe('ConfirmDialog', () => {
         );
 
         fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-        expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: 'Back' }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: 'Reset' }),
+        ).toBeInTheDocument();
     });
 });
-

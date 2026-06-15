@@ -1,10 +1,10 @@
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { useMemo } from 'react';
+import InputError from '@/components/input-error';
+import { MultiSelect } from '@/components/multi-select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { MultiSelect } from '@/components/multi-select';
-import InputError from '@/components/input-error';
 
 type UserPayload = {
     id?: number;
@@ -156,7 +156,10 @@ export default function UserForm() {
                     }))}
                     selected={form.data.grants.tags}
                     onChange={(grants) =>
-                        form.setData('grants.tags', grants)
+                        form.setData('grants', {
+                            ...form.data.grants,
+                            tags: grants,
+                        })
                     }
                     emptyLabel="No tags selected"
                 />
@@ -167,7 +170,10 @@ export default function UserForm() {
                     options={endpointOptions}
                     selected={form.data.grants.endpoints}
                     onChange={(grants) =>
-                        form.setData('grants.endpoints', grants)
+                        form.setData('grants', {
+                            ...form.data.grants,
+                            endpoints: grants,
+                        })
                     }
                     emptyLabel="No endpoints selected"
                 />
