@@ -15,7 +15,7 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | T4 | OpenApiSpecService + hardening | `task/openapi-service` | 🟢 merged (macro PR #16 → `main`, `d7b3b33`) | #16 |
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | 🟢 merged (PR #17 → `main`) | #17 |
 | T6 | Admin users + grants | `task/admin-users` | 🟢 merged (macro PR #18 → `main`) | #18 |
-| T7 | Servers + audit | `task/admin-servers-audit` | 🟡 in progress | — |
+| T7 | Servers + audit | `task/admin-servers-audit` | 🟢 merged (macro PR #19 → `main`, `699258a`) | #19 |
 | T8 | Hardening & polish | `task/hardening-polish` | ⚪ pending | — |
 | T9 | Release | `task/release` | ⚪ pending | — |
 
@@ -261,8 +261,9 @@ Implementation is in `task/admin-users` on top of `main`, with anti-tampering an
   - `php artisan db:seed --class=DatabaseSeeder --force` (Playwright prerequisite)
   - `npx playwright test` (9 passed)
 
-### 2026-06-15 — PR TBD (task/admin-servers-audit)
-- Awaiting: open PR for review and Codex merge. No review threads yet.
+### 2026-06-15 — PR #19 (task/admin-servers-audit)
+- PR #19 (`feat(servers): add audit logging and servers hardening coverage`) merged into `main` at commit `699258a`.
+- CI green, `reviewThreads(last:100)` returned 0 nodes, no unresolved Codex/PR threads at merge time.
 
 ## T8 — task/hardening-polish
 _Not started._
