@@ -19,6 +19,12 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withCommands()
+    ->withSchedule(function ($schedule): void {
+        $schedule->command('auth-logs:prune --days=30')
+            ->dailyAt('03:00')
+            ->withoutOverlapping();
+    })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 

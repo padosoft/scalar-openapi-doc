@@ -1,5 +1,13 @@
-import { Link } from '@inertiajs/react';
-import { BookOpen, FolderGit2, LayoutGrid } from 'lucide-react';
+import { Link, usePage } from '@inertiajs/react';
+import {
+    BookOpen,
+    Database,
+    FolderGit2,
+    LayoutGrid,
+    Logs,
+    MonitorDot,
+    Shield,
+} from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
@@ -38,6 +46,40 @@ const footerNavItems: NavItem[] = [
 ];
 
 export function AppSidebar() {
+    const { auth } = usePage().props;
+    const navItems: NavItem[] = [...mainNavItems];
+
+    if (auth.canViewScalar) {
+        navItems.push({
+            title: 'API Reference',
+            href: '/scalar',
+            icon: BookOpen,
+        });
+    }
+
+    if (auth.isAdmin) {
+        navItems.push({
+            title: 'Users',
+            href: '/admin/users',
+            icon: Shield,
+        });
+        navItems.push({
+            title: 'Servers',
+            href: '/servers',
+            icon: MonitorDot,
+        });
+        navItems.push({
+            title: 'Auth Logs',
+            href: '/auth-logs',
+            icon: Logs,
+        });
+        navItems.push({
+            title: 'OpenAPI Cache',
+            href: '/openapi-cache',
+            icon: Database,
+        });
+    }
+
     return (
         <Sidebar collapsible="icon" variant="inset">
             <SidebarHeader>
@@ -53,7 +95,7 @@ export function AppSidebar() {
             </SidebarHeader>
 
             <SidebarContent>
-                <NavMain items={mainNavItems} />
+                <NavMain items={navItems} />
             </SidebarContent>
 
             <SidebarFooter>

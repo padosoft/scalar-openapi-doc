@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e4814d37b6671afd558824c1e64240ed",
+    "content-hash": "4d11ca31440391a31f15bf5d737ca259",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -4121,6 +4121,75 @@
                 "source": "https://github.com/ramsey/uuid/tree/4.9.2"
             },
             "time": "2025-12-14T04:43:48+00:00"
+        },
+        {
+            "name": "scalar/laravel",
+            "version": "0.2.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/scalar/laravel.git",
+                "reference": "5f6dace4740a082df5058804430f12af01925810"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/scalar/laravel/zipball/5f6dace4740a082df5058804430f12af01925810",
+                "reference": "5f6dace4740a082df5058804430f12af01925810",
+                "shasum": ""
+            },
+            "require": {
+                "illuminate/contracts": "^10.0||^11.0||^12.0||^13.0",
+                "php": "^8.2||^8.3",
+                "spatie/laravel-package-tools": "^1.16"
+            },
+            "require-dev": {
+                "laravel/pint": "^1.14",
+                "nunomaduro/collision": "^8.7.0||^7.10.0",
+                "orchestra/testbench": "^8.0||^9.0||^10.0||^11.0",
+                "pestphp/pest": "^2.3.4||^3.7.4||^4.0",
+                "pestphp/pest-plugin-arch": "^2.7.0||^3.0.0||^4.0",
+                "pestphp/pest-plugin-laravel": "^2.3.0||^3.1.0||^4.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "aliases": {
+                        "Scalar": "Scalar\\Facades\\Scalar"
+                    },
+                    "providers": [
+                        "Scalar\\ScalarServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Scalar\\": "src/",
+                    "Scalar\\Database\\Factories\\": "database/factories/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Hans Pagel",
+                    "email": "mail@hanspagel.com",
+                    "role": "Developer"
+                }
+            ],
+            "description": "Render your OpenAPI-based API reference",
+            "homepage": "https://github.com/scalar/laravel",
+            "keywords": [
+                "laravel",
+                "openapi",
+                "scalar",
+                "swagger"
+            ],
+            "support": {
+                "issues": "https://github.com/scalar/laravel/issues",
+                "source": "https://github.com/scalar/laravel/tree/0.2.1"
+            },
+            "time": "2026-03-23T14:14:34+00:00"
         },
         {
             "name": "spatie/laravel-package-tools",

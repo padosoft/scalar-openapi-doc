@@ -12,6 +12,8 @@ export type User = {
 
 export type Auth = {
     user: User;
+    canViewScalar: boolean;
+    isAdmin: boolean;
 };
 
 /* @chisel-passkeys */
