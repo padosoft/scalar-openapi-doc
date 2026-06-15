@@ -1,12 +1,29 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { Cookie, Page } from '@playwright/test';
+
+test.describe.configure({ mode: 'serial' });
+
+const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com';
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'change-me';
+let ADMIN_SESSION_COOKIES: Cookie[] | null = null;
 
 async function loginAsAdmin(page: Page): Promise<void> {
+    if (ADMIN_SESSION_COOKIES !== null) {
+        await page.context().addCookies(ADMIN_SESSION_COOKIES);
+        await page.goto('/dashboard');
+        if (!page.url().includes('/dashboard')) {
+            await page.context().clearCookies();
+        } else {
+            return;
+        }
+    }
+
     await page.goto('/login');
-    await page.getByLabel(/email/i).fill('admin@example.com');
-    await page.getByLabel('Password', { exact: true }).fill('change-me');
+    await page.getByLabel(/email/i).fill(ADMIN_EMAIL);
+    await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD);
     await page.getByRole('button', { name: /log in/i }).click();
     await expect(page).toHaveURL('/dashboard');
+    ADMIN_SESSION_COOKIES = await page.context().cookies();
 }
 
 test('Admin users index and create form are usable from UI', async ({ page }) => {
