@@ -87,8 +87,20 @@ class FortifyServiceProvider extends ServiceProvider
 
         RateLimiter::for('login', function (Request $request) {
             $throttleKey = Str::transliterate(Str::lower($request->input(Fortify::username())).'|'.$request->ip());
+            $maxAttemptsConfig = config('openapi.login_rate_limit_attempts');
+            $maxAttempts = 5;
 
-            return Limit::perMinute(5)->by($throttleKey);
+            if (is_int($maxAttemptsConfig)) {
+                $maxAttempts = $maxAttemptsConfig;
+            } elseif (is_string($maxAttemptsConfig) && ctype_digit($maxAttemptsConfig)) {
+                $maxAttempts = (int) $maxAttemptsConfig;
+            }
+
+            if ($maxAttempts <= 0) {
+                $maxAttempts = 5;
+            }
+
+            return Limit::perMinute($maxAttempts)->by($throttleKey);
         });
 
         RateLimiter::for('passkeys', function (Request $request) {
