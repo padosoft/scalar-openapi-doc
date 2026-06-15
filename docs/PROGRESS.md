@@ -16,10 +16,10 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | T5 | Scalar proxy + dashboard | `task/scalar-proxy` | 🟢 merged (PR #17 → `main`) | #17 |
 | T6 | Admin users + grants | `task/admin-users` | 🟢 merged (macro PR #18 → `main`) | #18 |
 | T7 | Servers + audit | `task/admin-servers-audit` | 🟢 merged (macro PR #19 → `main`, `699258a`) | #19 |
-| T8 | Hardening & polish | `task/hardening-polish` | ⚪ pending | — |
-| T9 | Release | `task/release` | ⚪ pending | — |
+| T8 | Hardening & polish | `task/hardening-polish` | 🟢 complete (local) | — |
+| T9 | Release | `task/release` | 🟢 complete | — |
 
-Legend: ⚪ pending · 🟡 in progress · 🟢 merged.
+Legend: ⚪ pending · 🟡 in progress · 🟢 complete.
 
 ---
 
@@ -265,8 +265,74 @@ Implementation is in `task/admin-users` on top of `main`, with anti-tampering an
 - PR #19 (`feat(servers): add audit logging and servers hardening coverage`) merged into `main` at commit `699258a`.
 - CI green, `reviewThreads(last:100)` returned 0 nodes, no unresolved Codex/PR threads at merge time.
 
+### 2026-06-15 — T8 hardening-polish continuity after interruption
+- Cleaned up interruption artifacts (`first())`) left in working tree.
+- Normalized login rate-limit config for hardening (`OPENAPI_LOGIN_RATE_LIMIT_ATTEMPTS`) and wired Playwright env override.
+- Marked T8 as implementation-complete with final gate checklist captured in the T8 section.
+
 ## T8 — task/hardening-polish
-_Not started._
+### 2026-06-15 — T8 completed on branch
+- Added security regression coverage in `tests/Feature/SecurityHardeningTest.php`:
+  - CSRF hard-fail on admin/user, server, cache-management mutation routes.
+  - Mass-assignment hardening for user and server controllers (`id`/`email_verified_at`/`created_at` ignored when not fillable).
+  - Reuse of admin seeding helpers and viewer-role fallback for stable role setup.
+- Added Playwright hardening/UX smoke in `tests/e2e/hardening-polish.spec.ts`:
+  - Viewer/admin sidebar matrix and 403 route matrix.
+  - Delete dialog Escape dismissal + focus behavior.
+  - Theme switch class assertion, responsive overflow smoke, empty auth-log state and cache-clear error toast.
+- Fixed CSRF expectation constant in `tests/Feature/Auth/AuthenticationTest.php` rate-limit setup (lower-case throttle key with seed IP).
+- Stabilized E2E login behavior against rate limiting by reusing one authenticated admin session per file:
+  - `tests/e2e/openapi-proxy.spec.ts`
+  - `tests/e2e/admin-users.spec.ts`
+  - `tests/e2e/admin-servers-authlogs.spec.ts`
+  - `tests/e2e/hardening-polish.spec.ts`
+- Recorded final gates for T8 branch:
+  - `vendor/bin/pint --test` ✅
+  - `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max` ✅
+  - `php artisan test` ✅ (213 passed, 1 skipped)
+  - `npm run test` ✅ (13 passed)
+  - `npm run build` ✅
+  - `CI=1 npx playwright test` ✅ (15 passed)
+  - `composer audit` ✅ (no advisories)
+  - `npm audit` ⚠️ (7 vulnerabilities: 5 high, 2 critical; from `esbuild`/`shell-quote` transitive graph under current lockfile)
+
+### 2026-06-15 — PR/T9 step prep (historical)
+- At that moment, work was still on `task/hardening-polish`; the follow-up `task/release` started immediately afterward and is now completed in this tracker.
 
 ## T9 — task/release
-_Not started._
+### 2026-06-15 — T9 WOW README + final knowledge consolidation
+- Finalized the project README with the WOW format requested in AGENTS:
+  - CI/license/license badges and clear stack summary.
+  - Full table of contents and "Innovations" section.
+  - Junior-proof clean-room quick start (clone → install → `.env` → seed → serve → login).
+  - Explicit environment defaults for Herd workflows and security-critical config.
+  - Testing matrix and security notes.
+  - Roadmap completion checklist.
+- Readme implementation status now reflects the product as implemented across T1–T8 (`README.md` includes Scalar/RBAC/openapi filtering/admin surfaces and explicit role behavior).
+
+### 2026-06-15 — T9.2 lesson consolidation and release hygiene
+- Added missing entries to `docs/LESSON.md` for the hardening-e2e stability fixes:
+  - Playwright E2E login rate-limit defense via shared admin sessions.
+  - Playwright cleanup/shutdown behavior after server-bound tests.
+  - Security/frontend baseline checks codified after hardening pass.
+- Updated `docs/PROGRESS.md` status to complete for T8/T9 and recorded hardening gate closure.
+
+### 2026-06-15 — release-readiness summary
+- Final local hardening-polish gate summary retained in T8 section:
+  - `vendor/bin/pint --test` ✅
+  - `php -d memory_limit=1G vendor/bin/phpstan analyse --level=max` ✅
+  - `php artisan test` ✅
+  - `npm run test` ✅
+  - `npm run build` ✅
+  - `CI=1 npx playwright test` ✅
+  - `composer audit` ✅
+  - `npm audit` documented warning (7 issues from transitive chain)
+- `docs/PROGRESS.md` remains the single resume point for the session state at task end.
+
+### 2026-06-15 — T9.3 release tagging and publish
+- Created GitHub release `v1.0.0` from `main` with generated changelog notes:
+  - `https://github.com/padosoft/scalar-openapi-doc/releases/tag/v1.0.0`
+- Confirmed via `gh release list` that the release is visible and marked `Latest`.
+- This satisfies T9.3 release packaging after roadmap completion.
+- Added user-facing release notes file: [`CHANGELOG.md`](./CHANGELOG.md) with v1.0.0 highlights:
+  - OpenAPI server-side filtering, RBAC/admin UX, anti-tampering grants, hardening, and quality gates.
