@@ -87,8 +87,11 @@ test('Admin can grant a server to a user and it persists on edit', async ({
     await page.getByRole('button', { name: 'Create user' }).click();
     await expect(page).toHaveURL('/admin/users');
 
-    // The grant survives a round-trip: the edit form pre-selects one server.
+    // The grants column on the index reflects the server grant count.
     const row = page.locator('table tbody tr').filter({ hasText: email });
+    await expect(row).toContainText('Servers: 1 selected');
+
+    // The grant survives a round-trip: the edit form pre-selects one server.
     await row.getByRole('link', { name: 'Edit' }).click();
     await expect(page).toHaveURL(new RegExp('/admin/users/\\d+/edit'));
     await expect(
