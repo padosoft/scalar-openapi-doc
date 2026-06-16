@@ -41,9 +41,11 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
+        # `npm ci` (strict) — fails on package.json/lockfile drift like the
+        # deploy does. See LESSON [ci/cross-platform-lockfile].
         run: |
           composer install -q --no-ansi --no-interaction --no-progress --prefer-dist
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
 
       - name: Prepare app
         run: |
