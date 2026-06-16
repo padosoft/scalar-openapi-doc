@@ -47,25 +47,38 @@ test('Sidebar shows API Reference only for users with Scalar access', async ({ p
     const apiReferenceLink = page.getByRole('link', { name: 'API Reference' });
     await expect(apiReferenceLink).toBeVisible();
     await expect(apiReferenceLink).toHaveAttribute('href', '/scalar');
+    // Opens the docs in a new tab, keeping the portal open in the current one.
+    await expect(apiReferenceLink).toHaveAttribute('target', '_blank');
+    await expect(apiReferenceLink).toHaveAttribute(
+        'rel',
+        'noopener noreferrer',
+    );
 });
 
-test('API Reference link performs a full-page navigation to the real Scalar page', async ({ page }) => {
+test('API Reference link opens the real Scalar page in a new tab', async ({
+    page,
+    context,
+}) => {
     await loginAsAdmin(page);
     await expect(page).toHaveURL('/dashboard');
 
-    await page.getByRole('link', { name: 'API Reference' }).click();
+    // target=_blank opens a new tab; capture it via the context's page event.
+    const [scalarPage] = await Promise.all([
+        context.waitForEvent('page'),
+        page.getByRole('link', { name: 'API Reference' }).click(),
+    ]);
+    await scalarPage.waitForLoadState();
 
-    // A full document navigation lands on /scalar. (A regression — using an
-    // Inertia visit — would keep the URL on /dashboard and render the page in
-    // Inertia's sandboxed error-modal iframe instead.)
-    await expect(page).toHaveURL(/\/scalar$/);
+    // The original portal tab stays on /dashboard.
+    await expect(page).toHaveURL('/dashboard');
 
-    // The genuine Scalar page loaded on the app's own origin: its CDN bootstrap
-    // script is present and no Inertia error-modal iframe was injected.
+    // The new tab loads the genuine Scalar page on the app's own origin: its
+    // CDN bootstrap script is present and no Inertia error-modal iframe exists.
+    await expect(scalarPage).toHaveURL(/\/scalar$/);
     await expect(
-        page.locator('script[src*="@scalar/api-reference"]'),
+        scalarPage.locator('script[src*="@scalar/api-reference"]'),
     ).toHaveCount(1);
-    await expect(page.locator('iframe[srcdoc]')).toHaveCount(0);
+    await expect(scalarPage.locator('iframe[srcdoc]')).toHaveCount(0);
 });
 
 test('Admin users area is available and form loads', async ({ page }) => {

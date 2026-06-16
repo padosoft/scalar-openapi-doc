@@ -25,11 +25,17 @@ export function NavMain({ items = [] }: { items: NavItem[] }) {
                             tooltip={{ children: item.title }}
                         >
                             {item.external ? (
-                                // Full-page navigation for routes served outside
-                                // Inertia (e.g. Scalar's `/scalar`). An Inertia
-                                // visit would render the non-Inertia HTML in the
-                                // sandboxed error-modal iframe and show blank.
-                                <a href={toUrl(item.href)}>
+                                // Open routes served outside Inertia (e.g.
+                                // Scalar's `/scalar`) in a new tab. A native
+                                // anchor avoids Inertia rendering the non-Inertia
+                                // HTML in its sandboxed error-modal iframe (blank
+                                // page); `target=_blank` keeps the portal open in
+                                // the original tab. `rel` hardens the new window.
+                                <a
+                                    href={toUrl(item.href)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
                                     {item.icon && <item.icon />}
                                     <span>{item.title}</span>
                                 </a>
