@@ -36,7 +36,7 @@
         "prettier": "^3.4.2",
         "prettier-plugin-tailwindcss": "^0.6.11",
         "typescript-eslint": "^8.23.0",
-        "vitest": "^3.2.6"
+        "vitest": "^4.1.9"
     },
     "dependencies": {
         "@inertiajs/react": "^3.0.0",
@@ -61,7 +61,7 @@
         "@vitejs/plugin-react": "^5.2.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
-        "concurrently": "^9.0.1",
+        "concurrently": "^10.0.3",
         "globals": "^15.14.0",
         "input-otp": "^1.4.2",
         "laravel-vite-plugin": "^3.0.0",
