@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Actions\ReplaceUserAccessAction;
+use App\Models\ScalarServer;
 use App\Models\User;
 use App\Models\UserAllowedEndpoint;
 use App\Models\UserAllowedTag;
@@ -69,6 +70,38 @@ class ReplaceUserAccessActionTest extends TestCase
 
         $this->assertSame(1, $user->allowedTags()->count());
         $this->assertSame(1, $user->allowedEndpoints()->count());
+    }
+
+    public function test_replaces_server_grants_with_the_new_set(): void
+    {
+        $user = User::factory()->create();
+        $a = ScalarServer::create(['url' => 'https://a.local', 'sort_order' => 1, 'is_active' => true]);
+        $b = ScalarServer::create(['url' => 'https://b.local', 'sort_order' => 2, 'is_active' => true]);
+        $c = ScalarServer::create(['url' => 'https://c.local', 'sort_order' => 3, 'is_active' => true]);
+        $user->allowedServers()->attach($a->id);
+
+        // Duplicate + string ids are normalised; the old grant (a) is replaced.
+        $this->action()->handle($user, [], [], [$b->id, $c->id, (string) $c->id]);
+
+        $this->assertEqualsCanonicalizing(
+            [$b->id, $c->id],
+            $user->allowedServers()->pluck('scalar_servers.id')->all(),
+        );
+        $this->assertDatabaseMissing('user_allowed_servers', [
+            'user_id' => $user->id,
+            'scalar_server_id' => $a->id,
+        ]);
+    }
+
+    public function test_empty_server_ids_clear_server_grants(): void
+    {
+        $user = User::factory()->create();
+        $server = ScalarServer::create(['url' => 'https://a.local', 'sort_order' => 1, 'is_active' => true]);
+        $user->allowedServers()->attach($server->id);
+
+        $this->action()->handle($user, [], [], []);
+
+        $this->assertSame(0, $user->allowedServers()->count());
     }
 
     public function test_one_users_grants_do_not_affect_another(): void

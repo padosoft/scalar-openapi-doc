@@ -134,6 +134,13 @@ abstract class BaseUserRequest extends FormRequest
                 'max:255',
                 Rule::in($allowedEndpoints),
             ],
+            'grants.servers' => ['array'],
+            // Servers are DB-backed (scalar_servers), so anti-tampering is a
+            // direct existence check rather than a spec-derived allow-list.
+            'grants.servers.*' => [
+                'integer',
+                Rule::exists('scalar_servers', 'id'),
+            ],
         ];
     }
 
@@ -244,5 +251,28 @@ abstract class BaseUserRequest extends FormRequest
             (array) $this->input('grants.tags', []),
             static fn (mixed $tag): bool => is_string($tag) && trim($tag) !== '',
         ));
+    }
+
+    /**
+     * Granted scalar_servers primary keys (validated to exist by grantRules).
+     *
+     * @return list<int>
+     */
+    public function serverPayload(): array
+    {
+        $raw = $this->input('grants.servers', []);
+        $values = is_array($raw) ? array_values($raw) : [];
+
+        $ids = [];
+        foreach ($values as $value) {
+            if (is_int($value) || (is_string($value) && ctype_digit($value))) {
+                $int = (int) $value;
+                if ($int > 0) {
+                    $ids[$int] = $int;
+                }
+            }
+        }
+
+        return array_values($ids);
     }
 }

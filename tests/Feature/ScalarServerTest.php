@@ -58,19 +58,23 @@ final class ScalarServerTest extends TestCase
         $viewerRole = $this->viewerRole();
         $user->assignRole($viewerRole);
 
-        ScalarServer::query()->create([
+        $active = ScalarServer::query()->create([
             'url' => 'https://active.local',
             'description' => 'Active',
             'sort_order' => 1,
             'is_active' => true,
         ]);
 
-        ScalarServer::query()->create([
+        $inactive = ScalarServer::query()->create([
             'url' => 'https://inactive.local',
             'description' => 'Inactive',
             'sort_order' => 2,
             'is_active' => false,
         ]);
+
+        // Grant both to the viewer: only the active one should still be injected
+        // (active-vs-inactive is what this test covers; the grant is per-user).
+        $user->allowedServers()->attach([$active->id, $inactive->id]);
 
         $response = $this->actingAs($user)->get('/api-docs/openapi.json');
         $response->assertOk();

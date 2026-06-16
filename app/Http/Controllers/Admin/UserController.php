@@ -8,6 +8,7 @@ use App\Actions\ReplaceUserAccessAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
+use App\Models\ScalarServer;
 use App\Models\User;
 use App\Services\OpenApiSpecService;
 use Illuminate\Database\Eloquent\Collection;
@@ -34,6 +35,7 @@ class UserController extends Controller
             'user' => null,
             'roles' => $this->allRoles(),
             'openapi' => $this->catalogOrEmpty($openApiSpecService),
+            'servers' => $this->serverCatalog(),
         ]);
     }
 
@@ -49,7 +51,7 @@ class UserController extends Controller
             'password' => Hash::make($payload['password']),
         ]);
         $user->syncRoles([$payload['role']]);
-        $replaceUserAccessAction->handle($user, $payload['tags'], $payload['endpoints']);
+        $replaceUserAccessAction->handle($user, $payload['tags'], $payload['endpoints'], $payload['servers']);
 
         return to_route('admin.users.index')->with('status', 'User created.');
     }
@@ -68,10 +70,15 @@ class UserController extends Controller
                         ->map(fn ($endpoint): string => $endpoint->method->value.' '.$endpoint->path)
                         ->values()
                         ->all(),
+                    'servers' => array_map(
+                        static fn (int $id): string => (string) $id,
+                        $user->allowedServers->modelKeys(),
+                    ),
                 ],
             ],
             'roles' => $this->allRoles(),
             'openapi' => $this->catalogOrEmpty($openApiSpecService, $user),
+            'servers' => $this->serverCatalog($user),
         ]);
     }
 
@@ -99,7 +106,7 @@ class UserController extends Controller
 
         $user->save();
         $user->syncRoles([$payload['role']]);
-        $replaceUserAccessAction->handle($user, $payload['tags'], $payload['endpoints']);
+        $replaceUserAccessAction->handle($user, $payload['tags'], $payload['endpoints'], $payload['servers']);
 
         return to_route('admin.users.index')->with('status', 'User updated.');
     }
@@ -125,7 +132,8 @@ class UserController extends Controller
      *     role: string,
      *     password: string,
      *     tags: list<string>,
-     *     endpoints: list<array{method: string, path: string}>
+     *     endpoints: list<array{method: string, path: string}>,
+     *     servers: list<int>
      * }
      */
     private function validatedUserPayload(StoreUserRequest|UpdateUserRequest $request): array
@@ -137,6 +145,7 @@ class UserController extends Controller
             'password' => $request->string('password')->toString(),
             'tags' => $request->tagPayload(),
             'endpoints' => $request->endpointPayload(),
+            'servers' => $request->serverPayload(),
         ];
     }
 
@@ -339,6 +348,40 @@ class UserController extends Controller
 
             return $this->userGrantCatalog($user);
         }
+    }
+
+    /**
+     * Active playground servers offered for per-user grants. When editing, the
+     * user's currently-assigned servers are included even if since deactivated,
+     * so an existing grant stays visible and removable.
+     *
+     * @return list<array{value: string, label: string}>
+     */
+    private function serverCatalog(?User $user = null): array
+    {
+        $assignedIds = $user instanceof User ? $user->allowedServers->modelKeys() : [];
+
+        $servers = ScalarServer::query()
+            ->where(function ($query) use ($assignedIds): void {
+                $query->where('is_active', true);
+                if ($assignedIds !== []) {
+                    $query->orWhereIn('id', $assignedIds);
+                }
+            })
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get(['id', 'url', 'description']);
+
+        $options = [];
+        foreach ($servers as $server) {
+            $label = $server->description !== null && $server->description !== ''
+                ? $server->url.' — '.$server->description
+                : $server->url;
+
+            $options[] = ['value' => (string) $server->id, 'label' => $label];
+        }
+
+        return $options;
     }
 
     private function wouldDropLastAdmin(User $user, string $nextRole): bool
