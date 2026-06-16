@@ -47,20 +47,31 @@ export default function AdminAuthLogs() {
         [events],
     );
 
-    const applyFilters = (): void => {
+    const applyFilters = (values = search): void => {
         router.visit('/auth-logs', {
             preserveState: true,
             preserveScroll: true,
             only: ['rows', 'filters'],
             method: 'get',
-            data: search,
+            // The controller reads snake_case query params; also drop any stale
+            // `page` so a narrower filter never lands on an out-of-range page
+            // that would render as an empty (apparently blank) result set.
+            data: {
+                email: values.email,
+                event: values.event,
+                start_date: values.startDate,
+                end_date: values.endDate,
+                page: undefined,
+            },
         });
     };
 
     const resetFilters = (): void => {
         const reset = { email: '', event: '', startDate: '', endDate: '' };
         setSearch(reset);
-        applyFilters();
+        // Submit the reset values directly: setSearch is async, so reading
+        // `search` here would still hold the old (filtered) values.
+        applyFilters(reset);
     };
 
     return (
@@ -106,10 +117,40 @@ export default function AdminAuthLogs() {
                         </select>
                     </div>
 
+                    <div className="space-y-2">
+                        <Label htmlFor="start_date">From</Label>
+                        <Input
+                            id="start_date"
+                            type="date"
+                            value={search.startDate}
+                            onChange={(event) =>
+                                setSearch((current) => ({
+                                    ...current,
+                                    startDate: event.currentTarget.value,
+                                }))
+                            }
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label htmlFor="end_date">To</Label>
+                        <Input
+                            id="end_date"
+                            type="date"
+                            value={search.endDate}
+                            onChange={(event) =>
+                                setSearch((current) => ({
+                                    ...current,
+                                    endDate: event.currentTarget.value,
+                                }))
+                            }
+                        />
+                    </div>
+
                     <Button
                         type="button"
                         className="self-end"
-                        onClick={applyFilters}
+                        onClick={() => applyFilters()}
                     >
                         Apply
                     </Button>
@@ -127,6 +168,7 @@ export default function AdminAuthLogs() {
                 <DataTable
                     rows={paginator.data}
                     rowKey="id"
+                    emptyMessage="No authentication events match these filters."
                     columns={[
                         {
                             key: 'created_at',

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.7 — 2026-06-16
+
+### Fixed
+- **Auth logs only ever showed failed logins.** The `Login`/`Logout` listeners implemented `ShouldQueue`, but production runs `QUEUE_CONNECTION=database` with no always-on worker, so those audit rows were queued and never written — only the (synchronous) `failed` listener persisted. Filtering by `login`/`logout` then returned an empty result that read as a blank page. The two listeners now persist **synchronously** (a single lightweight insert), so every login, logout and failed attempt is recorded even without a queue worker. Regression-guarded by a Pest test that forces `queue.default=database`.
+- **Auth logs filter UX.** The page now exposes the **From/To date range** inputs (previously the date filter params were sent in camelCase and silently ignored by the controller), resets pagination when filters change so a narrower filter never lands on an out-of-range empty page, makes the `end_date` bound inclusive of the whole day, and shows an explicit empty-state message instead of a bare table.
+
+### Confirmed (already correct)
+- The "Auth Logs" sidebar link and the `/auth-logs` route are **admin-only** (gated by `auth.isAdmin` and the `role:admin` middleware).
+- Admins see authentication events for **all users**, not just their own (the controller applies no `user_id` scope). Added test coverage for both.
+
 ## v1.0.6 — 2026-06-16
 
 ### Changed

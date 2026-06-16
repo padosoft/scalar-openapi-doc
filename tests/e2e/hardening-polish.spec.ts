@@ -7,7 +7,11 @@ const ADMIN_EMAIL = process.env.E2E_ADMIN_EMAIL ?? 'admin@example.com';
 const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? 'change-me';
 let ADMIN_SESSION_COOKIES: Cookie[] | null = null;
 
-async function loginAs(page: Page, email: string, password: string): Promise<void> {
+async function loginAs(
+    page: Page,
+    email: string,
+    password: string,
+): Promise<void> {
     await page.goto('/login');
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel('Password', { exact: true }).fill(password);
@@ -32,11 +36,19 @@ async function loginAsAdmin(page: Page): Promise<void> {
     ADMIN_SESSION_COOKIES = await page.context().cookies();
 }
 
-async function loginAsUser(page: Page, email: string, password: string): Promise<void> {
+async function loginAsUser(
+    page: Page,
+    email: string,
+    password: string,
+): Promise<void> {
     await loginAs(page, email, password);
 }
 
-async function createViewerUser(page: Page, email: string, password: string): Promise<void> {
+async function createViewerUser(
+    page: Page,
+    email: string,
+    password: string,
+): Promise<void> {
     await page.goto('/admin/users/create');
     await page.getByLabel('Name').fill('Viewer User');
     await page.getByLabel('Email').fill(email);
@@ -58,7 +70,9 @@ async function resetAuthSession(page: Page): Promise<void> {
     });
 }
 
-test('Viewer route matrix is enforced and admin sidebar links are hidden', async ({ page }) => {
+test('Viewer route matrix is enforced and admin sidebar links are hidden', async ({
+    page,
+}) => {
     const viewerEmail = `viewer-${Date.now()}@example.com`;
 
     await loginAsAdmin(page);
@@ -66,11 +80,15 @@ test('Viewer route matrix is enforced and admin sidebar links are hidden', async
     await resetAuthSession(page);
 
     await loginAsUser(page, viewerEmail, 'Password123!');
-    await expect(page.getByRole('link', { name: 'API Reference' })).toBeVisible();
+    await expect(
+        page.getByRole('link', { name: 'API Reference' }),
+    ).toBeVisible();
     await expect(page.getByRole('link', { name: 'Users' })).toBeHidden();
     await expect(page.getByRole('link', { name: 'Servers' })).toBeHidden();
     await expect(page.getByRole('link', { name: 'Auth Logs' })).toBeHidden();
-    await expect(page.getByRole('link', { name: 'OpenAPI Cache' })).toBeHidden();
+    await expect(
+        page.getByRole('link', { name: 'OpenAPI Cache' }),
+    ).toBeHidden();
 
     expect((await page.request.get('/admin/users')).status()).toBe(403);
     expect((await page.request.get('/admin/users/create')).status()).toBe(403);
@@ -80,7 +98,9 @@ test('Viewer route matrix is enforced and admin sidebar links are hidden', async
     expect((await page.request.get('/openapi-cache')).status()).toBe(403);
 });
 
-test('Confirm dialog can be dismissed with Escape and keeps keyboard focus behavior stable', async ({ page }) => {
+test('Confirm dialog can be dismissed with Escape and keeps keyboard focus behavior stable', async ({
+    page,
+}) => {
     const userEmail = `admin-delete-${Date.now()}@example.com`;
 
     await loginAsAdmin(page);
@@ -99,15 +119,25 @@ test('Confirm dialog can be dismissed with Escape and keeps keyboard focus behav
     await expect(row.getByRole('button', { name: 'Delete' })).toBeFocused();
 });
 
-test('Appearance settings toggles theme classes in both directions', async ({ page }) => {
+test('Appearance settings toggles theme classes in both directions', async ({
+    page,
+}) => {
     await loginAsAdmin(page);
     await page.goto('/settings/appearance');
 
     await page.getByRole('button', { name: 'Dark' }).click();
-    expect(await page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(true);
+    expect(
+        await page.evaluate(() =>
+            document.documentElement.classList.contains('dark'),
+        ),
+    ).toBe(true);
 
     await page.getByRole('button', { name: 'Light' }).click();
-    expect(await page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(false);
+    expect(
+        await page.evaluate(() =>
+            document.documentElement.classList.contains('dark'),
+        ),
+    ).toBe(false);
 });
 
 test('Responsive layout and empty states remain usable', async ({ page }) => {
@@ -123,7 +153,9 @@ test('Responsive layout and empty states remain usable', async ({ page }) => {
     await page.goto('/auth-logs');
     await page.getByLabel('Email').fill(`nope-${Date.now()}@example.com`);
     await page.getByRole('button', { name: 'Apply' }).click();
-    await expect(page.getByText('No rows.')).toBeVisible();
+    await expect(
+        page.getByText('No authentication events match these filters.'),
+    ).toBeVisible();
 });
 
 test('Cache clear error state is surfaced to the user', async ({ page }) => {
@@ -145,7 +177,9 @@ test('Cache clear error state is surfaced to the user', async ({ page }) => {
 
     await page.goto('/openapi-cache');
     await page.getByRole('button', { name: 'Flush cache' }).click();
-    await expect(page.getByText(/Failed to clear cache|Unable to find CSRF token/)).toBeVisible();
+    await expect(
+        page.getByText(/Failed to clear cache|Unable to find CSRF token/),
+    ).toBeVisible();
 });
 
 test('State-changing requests reject invalid CSRF tokens', async ({ page }) => {
