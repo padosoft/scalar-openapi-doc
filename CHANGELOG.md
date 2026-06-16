@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.1 — 2026-06-16
+
+### Fixed
+- **API Reference opened a blank modal.** The sidebar linked to `/scalar` with an Inertia client-side visit, but `/scalar` is a non-Inertia page (rendered by `scalar/laravel`). Inertia displayed it inside its sandboxed error-modal iframe (opaque origin), so Scalar's spec fetch was blocked and the panel stayed blank. The link is now a native full-page navigation (`NavItem.external`), so Scalar loads on the real origin.
+
+### Changed
+- **Rebranded to "API DOCS":** sidebar header + app name, custom `</>` logo and favicon; removed the Laravel `favicon.ico`/`apple-touch-icon.png`.
+- Removed the "Repository" and "Documentation" links from the sidebar footer.
+- The root URL `/` now redirects to the dashboard (authenticated) or login (guest); the marketing welcome page is no longer reachable.
+
+### Tests
+- Vitest coverage that external nav items render a native anchor; Playwright coverage that the API Reference link performs a real full-page navigation to the Scalar page; `HomeRedirectTest` for the root redirect both ways.
+
 ## v1.0.0 — 2026-06-15
 
 ### Added
