@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.4 — 2026-06-16
+
+### Security
+- **Resolved all open npm audit advisories (2 critical, 5 high).** All were dev/build transitive dependencies (`composer audit` was already clean):
+  - **esbuild** (`GHSA-gv7w-rqvm-qjhr`, `GHSA-g7r4-m6w7-qqqr`) — a stale `package-lock.json` still encoded vitest 3.x's bundled vite + esbuild tree; bumped `vitest` to `^4.1.9` (vite 8 / rolldown, esbuild no longer in the tree).
+  - **shell-quote** (`GHSA-w7jw-789q-3m8p`) via `concurrently` — bumped `concurrently` to `^10.0.3` (patched `shell-quote` 1.8.4).
+- `npm audit` now reports **0 vulnerabilities**.
+
+### Changed
+- Refreshed all remaining in-range minor/patch dependencies (`@playwright/test` 1.61, Radix UI, `typescript-eslint`, …) and regenerated the lockfile. Major upgrades (eslint 10, TypeScript 6, `@vitejs/plugin-react` 6, `lucide-react` 1.x) are intentionally deferred to dedicated migration work.
+
 ## v1.0.3 — 2026-06-16
 
 ### Added
