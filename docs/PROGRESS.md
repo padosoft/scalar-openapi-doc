@@ -367,3 +367,10 @@ User asked to resolve the open vulnerabilities + update dependencies.
 - **Result:** `npm audit` → 0 vulnerabilities; **0 open Dependabot alerts**. Major bumps (eslint 10, TS 6, `@vitejs/plugin-react` 6, lucide 1.x) deferred to dedicated migration.
 - **Gates (all green):** pint, phpstan max (0), `php artisan test` 224 pass/1 skip, vitest 4.1.9 15, tsc 0, lint, format, build, `npx playwright test` 17 passed (after `npx playwright install chromium-headless-shell` for PW 1.61).
 - **Release:** `v1.0.4` published from `main` (`5408acf`), marked Latest; CHANGELOG.md updated.
+- **⚠️ v1.0.4 ships a broken lockfile** (see post-1.0.4 below) — deploy from that tag fails `npm ci`; superseded by v1.0.5.
+
+## Post-1.0.4 — lockfile fix + API Reference new tab (→ `main`, release v1.0.5)
+- **`fix/lockfile-npm-ci` → PR #25 (`1aec680`):** user reported the deploy breaks — `npm ci` aborted with `Missing: @emnapi/wasi-threads@1.2.1 from lock file`. The v1.0.4 in-place `npm update` left the lockfile inconsistent; CI uses `npm install` (tolerant) so it didn't catch it, but deploy uses `npm ci` (strict). Fix: `rm -rf node_modules package-lock.json && npm install`; `npm ci` now exits 0, package.json unchanged, audit still 0. See LESSON `[deps/npm-ci-vs-install-lockfile-drift]`.
+- **`feat/api-reference-new-tab` → PR #26 (`43a633c`):** sidebar "API Reference" now opens `/scalar` in a new tab (`target=_blank` + `rel=noopener noreferrer`); still a native anchor (not Inertia) per the v1.0.1 iframe fix. Vitest asserts target/rel; Playwright asserts a new tab opens on /scalar while the portal tab stays on /dashboard.
+- **Gates (all green):** vitest 15, tsc 0, lint, format, build, `npx playwright test` 17; `npm ci` 0; `npm audit` 0.
+- **Release:** `v1.0.5` published from `main`, marked Latest; CHANGELOG.md updated. **Deployable tag = v1.0.5.**

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.5 — 2026-06-16
+
+### Fixed
+- **Deploy-breaking lockfile.** The `package-lock.json` regenerated in v1.0.4 was internally inconsistent — `npm ci` (used by the deploy) aborted with `Missing: @emnapi/wasi-threads@1.2.1 from lock file`. CI uses `npm install` (tolerant) so it stayed green, but the deploy uses `npm ci` (strict). Regenerated the lockfile from a clean install; `npm ci` now resolves cleanly. **Deploy from v1.0.4 will fail — use v1.0.5.**
+
+### Changed
+- **API Reference opens in a new tab.** The sidebar "API Reference" link now opens the Scalar docs in a new browser tab (`target="_blank"` + `rel="noopener noreferrer"`) instead of replacing the portal, so the docs load alongside the admin portal.
+
 ## v1.0.4 — 2026-06-16
 
 ### Security
