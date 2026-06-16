@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.6 — 2026-06-16
+
+### Changed
+- **CI now installs with `npm ci` (strict).** All workflow jobs (lint, frontend, e2e) switched from `npm install` (tolerant — silently repairs the lockfile) to `npm ci --no-audit --no-fund`, the same strict install the deploy uses. Any `package.json` ↔ `package-lock.json` drift now fails fast in PR instead of reaching deploy. Verified the regenerated lockfile is `npm ci`-clean on Linux (node:22 container) before enabling.
+
 ## v1.0.5 — 2026-06-16
 
 ### Fixed
