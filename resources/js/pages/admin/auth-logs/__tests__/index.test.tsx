@@ -27,9 +27,7 @@ describe('AdminAuthLogs', () => {
         ).toBeInTheDocument();
         // Empty result set must show the table fallback, never a blank screen.
         expect(
-            screen.getByText(
-                'No authentication events match these filters.',
-            ),
+            screen.getByText('No authentication events match these filters.'),
         ).toBeInTheDocument();
 
         // Selecting an event and applying filters should issue a router visit.

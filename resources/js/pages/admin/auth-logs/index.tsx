@@ -47,7 +47,7 @@ export default function AdminAuthLogs() {
         [events],
     );
 
-    const applyFilters = (): void => {
+    const applyFilters = (values = search): void => {
         router.visit('/auth-logs', {
             preserveState: true,
             preserveScroll: true,
@@ -57,10 +57,10 @@ export default function AdminAuthLogs() {
             // `page` so a narrower filter never lands on an out-of-range page
             // that would render as an empty (apparently blank) result set.
             data: {
-                email: search.email,
-                event: search.event,
-                start_date: search.startDate,
-                end_date: search.endDate,
+                email: values.email,
+                event: values.event,
+                start_date: values.startDate,
+                end_date: values.endDate,
                 page: undefined,
             },
         });
@@ -69,7 +69,9 @@ export default function AdminAuthLogs() {
     const resetFilters = (): void => {
         const reset = { email: '', event: '', startDate: '', endDate: '' };
         setSearch(reset);
-        applyFilters();
+        // Submit the reset values directly: setSearch is async, so reading
+        // `search` here would still hold the old (filtered) values.
+        applyFilters(reset);
     };
 
     return (
@@ -148,7 +150,7 @@ export default function AdminAuthLogs() {
                     <Button
                         type="button"
                         className="self-end"
-                        onClick={applyFilters}
+                        onClick={() => applyFilters()}
                     >
                         Apply
                     </Button>

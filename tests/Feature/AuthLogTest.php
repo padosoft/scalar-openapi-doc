@@ -133,7 +133,7 @@ final class AuthLogTest extends TestCase
         ]);
     }
 
-    public function test_admin_sees_logout_and_failed_events_for_all_users(): void
+    public function test_admin_sees_login_and_logout_events_for_all_users(): void
     {
         $adminRole = (string) config('openapi.admin_role', 'admin');
         $this->seed(DatabaseSeeder::class);
