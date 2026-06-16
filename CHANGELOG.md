@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.2 — 2026-06-16
+
+### Added
+- **Per-user server grants.** Admins can now assign specific playground servers to each user via a new "Granted servers" picker on the user form. Visibility is **deny-by-default**: admins see all active servers in the spec's `servers` list, a user sees only the active servers granted to them, and a user with no grants sees none. Backed by a `user_allowed_servers` pivot with server-side anti-tampering (only active or already-assigned servers are grantable).
+
 ## v1.0.1 — 2026-06-16
 
 ### Fixed
