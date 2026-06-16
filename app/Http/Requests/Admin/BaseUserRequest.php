@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests\Admin;
 
+use App\Models\ScalarServer;
 use App\Models\User;
 use App\Models\UserAllowedEndpoint;
 use App\Services\OpenApiSpecService;
@@ -135,13 +136,73 @@ abstract class BaseUserRequest extends FormRequest
                 Rule::in($allowedEndpoints),
             ],
             'grants.servers' => ['array'],
-            // Servers are DB-backed (scalar_servers), so anti-tampering is a
-            // direct existence check rather than a spec-derived allow-list.
+            // Anti-tampering: only servers the admin could actually select are
+            // grantable — active servers, plus this user's already-assigned
+            // servers (so an existing grant to a since-deactivated server can
+            // still be re-submitted from the edit form without being rejected).
             'grants.servers.*' => [
                 'integer',
-                Rule::exists('scalar_servers', 'id'),
+                Rule::in($this->grantableServerIds()),
             ],
         ];
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function grantableServerIds(): array
+    {
+        /** @var list<mixed> $active */
+        $active = ScalarServer::query()
+            ->where('is_active', true)
+            ->pluck('id')
+            ->all();
+
+        $unique = [];
+        foreach ([...$active, ...$this->existingGrantedServerIds()] as $id) {
+            $int = $this->toPositiveInt($id);
+            if ($int !== null) {
+                $unique[$int] = $int;
+            }
+        }
+
+        return array_values($unique);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function existingGrantedServerIds(): array
+    {
+        $user = $this->route('user');
+        if (! $user instanceof User) {
+            return [];
+        }
+
+        $ids = [];
+        foreach ($user->allowedServers->modelKeys() as $id) {
+            $int = $this->toPositiveInt($id);
+            if ($int !== null) {
+                $ids[] = $int;
+            }
+        }
+
+        return $ids;
+    }
+
+    private function toPositiveInt(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value > 0 ? $value : null;
+        }
+
+        if (is_string($value) && ctype_digit($value)) {
+            $int = (int) $value;
+
+            return $int > 0 ? $int : null;
+        }
+
+        return null;
     }
 
     /**
