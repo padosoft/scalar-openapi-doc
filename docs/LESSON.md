@@ -6,6 +6,12 @@ Format per entry: `- **[area]** lesson. **Why:** … **How to apply:** …`
 
 ---
 
+## 2026-06-16 (post-1.0.3 security deps)
+
+- **[deps/stale-lockfile-phantom-audit]** `npm audit` flagged a high esbuild advisory via "vitest 3.x → bundled vite → esbuild" even though `node_modules` had already moved to vitest 4 / vite 8 (which uses rolldown, no esbuild). **Why:** `package-lock.json` was out of sync with `node_modules` — `npm audit` reads the **lockfile**, `npm ls` reads `node_modules`, so they disagreed. The fix isn't `npm audit fix --force` (which can downgrade/churn) but aligning `package.json` to the already-installed major (`vitest ^4.1.9`) + a plain `npm install`/`npm update` to regenerate a consistent lockfile. Confirm with `npm ls <pkg>` vs `npm audit` when they disagree. **How to apply:** when audit findings reference a dep tree that `npm ls` says you don't have, suspect a stale lockfile; bump the range to match reality and regenerate, then re-audit.
+
+- **[deps/playwright-browser-after-bump]** After bumping `@playwright/test` (1.60→1.61 via `npm update`), e2e failed with "Executable doesn't exist … chrome-headless-shell" / "Looks like Playwright was just installed or updated." **Why:** the browser binary is versioned per Playwright release and isn't pulled by `npm install`. **How to apply:** run `npx playwright install chromium-headless-shell` (the config uses headless shell) after any Playwright version bump, locally and in CI, before running e2e. A transient "Download failure" just needs a retry.
+
 ## 2026-06-15 (T5 admin users foundation hardening)
 
 - **[e2e/rate-limit-session-reuse]** Reusing one authenticated admin session across Playwright files reduces flaky test failures when login rate limiting is enabled for authentication. **Why:** repeated logins can trip `OPENAPI_LOGIN_RATE_LIMIT_ATTEMPTS` even in intentionally scoped test suites, causing false 429 failures after a few suites. **How to apply:** cache authenticated cookies in helper scope (`Cookie[]`), restore once per file, and only fall back to login when the restored session is invalid.
