@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.3 — 2026-06-16
+
+### Added
+- **Granted server count on the admin users list.** The `/admin/users` grants column now shows `Servers: X selected` alongside Tags and Endpoints, so an admin can tell at a glance whether a user is restricted to specific playground servers — without opening the edit form. Covered by Pest (index serialization) and Playwright (list-row display).
+
 ## v1.0.2 — 2026-06-16
 
 ### Added
