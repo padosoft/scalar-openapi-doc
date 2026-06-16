@@ -41,7 +41,7 @@ class OpenApiDocsTest extends TestCase
             'path' => '/orders/{id}',
         ]);
 
-        ScalarServer::create([
+        $gateway = ScalarServer::create([
             'url' => 'https://scalar-proxy.local',
             'description' => 'Gateway',
             'sort_order' => 10,
@@ -53,6 +53,8 @@ class OpenApiDocsTest extends TestCase
             'sort_order' => 20,
             'is_active' => false,
         ]);
+        // Servers are deny-by-default per user: grant the Gateway to this viewer.
+        $user->allowedServers()->attach($gateway->id);
 
         $response = $this->actingAs($user)->get('/api-docs/openapi.json');
 
@@ -71,6 +73,63 @@ class OpenApiDocsTest extends TestCase
             ['url' => 'https://scalar-proxy.local', 'description' => 'Gateway'],
         ], $payload['servers']);
         $this->assertArrayNotHasKey('servers', $payload['paths']['/orders/{id}']['get']);
+    }
+
+    public function test_viewer_without_granted_servers_sees_no_servers(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+
+        $user = User::factory()->create();
+        $user->assignRole($this->viewerRole());
+        UserAllowedTag::create([
+            'user_id' => $user->id,
+            'tag' => 'Catalog',
+        ]);
+
+        // An active server exists, but it is not granted to this user.
+        ScalarServer::create([
+            'url' => 'https://scalar-proxy.local',
+            'description' => 'Gateway',
+            'sort_order' => 10,
+            'is_active' => true,
+        ]);
+
+        $payload = $this->actingAs($user)->get('/api-docs/openapi.json')->json();
+
+        $this->assertArrayHasKey('/orders/{id}', $payload['paths']);
+        // Deny-by-default: no granted servers ⇒ the spec exposes no servers at all
+        // (the upstream `servers` list is stripped too).
+        $this->assertArrayNotHasKey('servers', $payload);
+    }
+
+    public function test_admin_sees_all_active_servers_without_grants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+
+        $admin = User::factory()->create();
+        $admin->assignRole((string) config('openapi.admin_role', 'admin'));
+
+        ScalarServer::create([
+            'url' => 'https://scalar-proxy.local',
+            'description' => 'Gateway',
+            'sort_order' => 10,
+            'is_active' => true,
+        ]);
+        ScalarServer::create([
+            'url' => 'https://inactive.local',
+            'description' => 'Dormant',
+            'sort_order' => 20,
+            'is_active' => false,
+        ]);
+
+        $payload = $this->actingAs($admin)->get('/api-docs/openapi.json')->json();
+
+        // Admin bypasses per-user server grants: all ACTIVE servers, inactive excluded.
+        $this->assertSame([
+            ['url' => 'https://scalar-proxy.local', 'description' => 'Gateway'],
+        ], $payload['servers']);
     }
 
     public function test_admin_bypasses_filtering_and_sees_full_spec(): void

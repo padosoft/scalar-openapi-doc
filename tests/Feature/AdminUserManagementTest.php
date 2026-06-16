@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Enums\HttpVerb;
+use App\Models\ScalarServer;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -54,6 +55,127 @@ class AdminUserManagementTest extends TestCase
         $this->assertSame(['GET /orders/{id}'], $created->allowedEndpoints->map(
             fn ($endpoint): string => $endpoint->method->value.' '.$endpoint->path
         )->all());
+    }
+
+    public function test_admin_can_create_user_with_server_grants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+        $admin = $this->createAdmin();
+        $server = ScalarServer::create([
+            'url' => 'https://grantable.local',
+            'description' => 'Grantable',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($admin)->post('/admin/users', [
+            'name' => 'Server Grantee',
+            'email' => 'server-grantee@example.com',
+            'password' => 'password',
+            'role' => 'user',
+            'grants' => [
+                'tags' => [],
+                'endpoints' => [],
+                'servers' => [$server->id],
+            ],
+        ]);
+
+        $response->assertRedirect('/admin/users');
+        $created = User::query()->where('email', 'server-grantee@example.com')->firstOrFail();
+        $this->assertSame([$server->id], $created->allowedServers->modelKeys());
+    }
+
+    public function test_admin_can_keep_existing_grant_to_a_deactivated_server(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+        $admin = $this->createAdmin();
+
+        $server = ScalarServer::create([
+            'url' => 'https://was-active.local',
+            'description' => 'Was active',
+            'sort_order' => 1,
+            'is_active' => false,
+        ]);
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $user->allowedServers()->attach($server->id);
+
+        // The server is now inactive but already assigned, so re-submitting it
+        // from the edit form must be accepted (not treated as tampering).
+        $response = $this->actingAs($admin)->from('/admin/users/'.$user->id.'/edit')->put(
+            '/admin/users/'.$user->id,
+            [
+                'name' => $user->name,
+                'email' => $user->email,
+                'password' => '',
+                'role' => 'user',
+                'grants' => [
+                    'tags' => [],
+                    'endpoints' => [],
+                    'servers' => [$server->id],
+                ],
+            ],
+        );
+
+        $response->assertRedirect('/admin/users');
+        $response->assertSessionDoesntHaveErrors();
+        $this->assertSame([$server->id], $user->fresh()->allowedServers->modelKeys());
+    }
+
+    public function test_admin_user_request_rejects_unknown_server_grants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+        $admin = $this->createAdmin();
+
+        $response = $this->actingAs($admin)->post('/admin/users', [
+            'name' => 'Bad Server User',
+            'email' => 'bad-server@example.com',
+            'password' => 'password',
+            'role' => 'user',
+            'grants' => [
+                'tags' => [],
+                'endpoints' => [],
+                'servers' => [999999],
+            ],
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors(['grants.servers.0']);
+        $this->assertDatabaseMissing('users', ['email' => 'bad-server@example.com']);
+    }
+
+    public function test_admin_user_request_rejects_inactive_unassigned_server_grants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->seedOpenApiSpec();
+        $admin = $this->createAdmin();
+        // Exists but is inactive and not already assigned to anyone — a tampered
+        // request must not be able to grant it (it is never offered in the UI).
+        $inactive = ScalarServer::create([
+            'url' => 'https://inactive.local',
+            'description' => 'Inactive',
+            'sort_order' => 1,
+            'is_active' => false,
+        ]);
+
+        $response = $this->actingAs($admin)->post('/admin/users', [
+            'name' => 'Inactive Server User',
+            'email' => 'inactive-server@example.com',
+            'password' => 'password',
+            'role' => 'user',
+            'grants' => [
+                'tags' => [],
+                'endpoints' => [],
+                'servers' => [$inactive->id],
+            ],
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasErrors(['grants.servers.0']);
+        $this->assertDatabaseMissing('users', ['email' => 'inactive-server@example.com']);
     }
 
     public function test_admin_user_request_rejects_unknown_tag_or_endpoint_grants(): void

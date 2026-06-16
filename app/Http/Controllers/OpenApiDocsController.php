@@ -39,10 +39,21 @@ final class OpenApiDocsController extends Controller
             $isAdmin,
         );
 
-        /** @var list<array<string, mixed>> $servers */
-        $servers = ScalarServer::query()
+        // Per-user server visibility: admins see all active servers; a non-admin
+        // sees only the active servers granted to them (none granted = none
+        // shown). Filtering by id over the active set keeps a deactivated server
+        // hidden even if it is still granted.
+        $serversQuery = ScalarServer::query()
             ->where('is_active', true)
-            ->orderBy('sort_order')
+            ->orderBy('sort_order');
+
+        if (! $isAdmin) {
+            $allowedServerIds = $user->allowedServers()->pluck('scalar_servers.id')->all();
+            $serversQuery->whereIn('id', $allowedServerIds);
+        }
+
+        /** @var list<array<string, mixed>> $servers */
+        $servers = $serversQuery
             ->get(['url', 'description'])
             ->map(
                 static fn (ScalarServer $server): array => [

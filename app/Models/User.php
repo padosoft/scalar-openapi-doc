@@ -9,6 +9,7 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -80,5 +81,18 @@ class User extends Authenticatable implements PasskeyUser
     public function authLogs(): HasMany
     {
         return $this->hasMany(AuthLog::class);
+    }
+
+    /**
+     * Scalar playground servers this user may see in the spec's `servers` list.
+     * Admins bypass this (they see all active servers); a user with no granted
+     * servers sees none.
+     *
+     * @return BelongsToMany<ScalarServer, $this>
+     */
+    public function allowedServers(): BelongsToMany
+    {
+        return $this->belongsToMany(ScalarServer::class, 'user_allowed_servers')
+            ->withTimestamps();
     }
 }

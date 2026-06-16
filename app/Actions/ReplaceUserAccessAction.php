@@ -11,10 +11,11 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Replaces a user's granted tags and endpoints in a single transaction:
- * delete the existing rows, then bulk-insert the new set (chunked). Reproduces
- * the "clear and re-insert" semantics atomically (ADR-07). No array_merge in
- * loops — rows are built once and inserted in chunks.
+ * Replaces a user's granted tags, endpoints and servers in a single
+ * transaction: delete the existing tag/endpoint rows and bulk-insert the new
+ * set (chunked), then sync the server pivot. Reproduces the "clear and
+ * re-insert" semantics atomically (ADR-07). No array_merge in loops — rows are
+ * built once and inserted in chunks.
  */
 final class ReplaceUserAccessAction
 {
@@ -24,10 +25,11 @@ final class ReplaceUserAccessAction
     /**
      * @param  list<string>  $tags  OpenAPI tag names
      * @param  list<array{method: string, path: string}>  $endpoints
+     * @param  list<int|string>  $serverIds  scalar_servers primary keys
      */
-    public function handle(User $user, array $tags, array $endpoints): void
+    public function handle(User $user, array $tags, array $endpoints, array $serverIds = []): void
     {
-        DB::transaction(function () use ($user, $tags, $endpoints): void {
+        DB::transaction(function () use ($user, $tags, $endpoints, $serverIds): void {
             $user->allowedTags()->delete();
             $user->allowedEndpoints()->delete();
 
@@ -35,7 +37,28 @@ final class ReplaceUserAccessAction
 
             $this->insertChunked(UserAllowedTag::class, $this->tagRows($user->id, $tags, $now));
             $this->insertChunked(UserAllowedEndpoint::class, $this->endpointRows($user->id, $endpoints, $now));
+
+            // Servers reference scalar_servers rows by id, so a pivot sync is the
+            // natural "replace the whole set" operation (dedupes keys itself).
+            $user->allowedServers()->sync($this->serverIds($serverIds));
         });
+    }
+
+    /**
+     * @param  list<int|string>  $serverIds
+     * @return list<int>
+     */
+    private function serverIds(array $serverIds): array
+    {
+        $unique = [];
+        foreach ($serverIds as $id) {
+            $int = (int) $id;
+            if ($int > 0) {
+                $unique[$int] = $int;
+            }
+        }
+
+        return array_values($unique);
     }
 
     /**

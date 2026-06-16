@@ -14,6 +14,7 @@ type UserPayload = {
     grants?: {
         tags: string[];
         endpoints: string[];
+        servers: string[];
     };
 };
 
@@ -22,14 +23,17 @@ type GrantsCatalog = {
     endpoints: Array<{ value: string; label: string }>;
 };
 
+type ServerOption = { value: string; label: string };
+
 type UserFormProps = {
     user: UserPayload | null;
     roles: string[];
     openapi: GrantsCatalog;
+    servers: ServerOption[];
 };
 
 export default function UserForm() {
-    const { user, roles, openapi } = usePage<UserFormProps>().props;
+    const { user, roles, openapi, servers } = usePage<UserFormProps>().props;
     const isEdit = user !== null;
 
     const endpointOptions = useMemo(
@@ -49,6 +53,7 @@ export default function UserForm() {
         grants: {
             tags: user?.grants?.tags ?? [],
             endpoints: user?.grants?.endpoints ?? [],
+            servers: user?.grants?.servers ?? [],
         },
     });
 
@@ -178,6 +183,20 @@ export default function UserForm() {
                     emptyLabel="No endpoints selected"
                 />
                 <InputError message={form.errors['grants.endpoints']} />
+
+                <MultiSelect
+                    label="Granted servers"
+                    options={servers}
+                    selected={form.data.grants.servers}
+                    onChange={(grants) =>
+                        form.setData('grants', {
+                            ...form.data.grants,
+                            servers: grants,
+                        })
+                    }
+                    emptyLabel="No servers selected"
+                />
+                <InputError message={form.errors['grants.servers']} />
 
                 <div className="flex items-center gap-2">
                     <Button type="submit" disabled={form.processing}>
