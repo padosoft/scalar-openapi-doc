@@ -7,11 +7,12 @@ use App\Http\Controllers\Admin\OpenApiCacheController;
 use App\Http\Controllers\Admin\ScalarServerController;
 use App\Http\Controllers\Admin\UserController as AdminUserController;
 use App\Http\Controllers\OpenApiDocsController;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Route;
 
 // The marketing welcome page is not part of this product: send the root URL
 // straight to the dashboard when authenticated, otherwise to the login page.
-Route::get('/', static function () {
+Route::get('/', static function (): RedirectResponse {
     return redirect()->route(auth()->check() ? 'dashboard' : 'login');
 })->name('home');
 
