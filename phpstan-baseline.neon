@@ -111,5 +111,5 @@ parameters:
 		-
 			message: '#^Cannot call method name\(\) on mixed\.$#'
 			identifier: method.nonObject
-			count: 2
+			count: 1
 			path: routes/web.php

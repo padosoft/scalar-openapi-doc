@@ -11,6 +11,7 @@ async function loginAsAdmin(page: Page): Promise<void> {
     if (ADMIN_SESSION_COOKIES !== null) {
         await page.context().addCookies(ADMIN_SESSION_COOKIES);
         await page.goto('/dashboard');
+
         if (!page.url().includes('/dashboard')) {
             await page.context().clearCookies();
         } else {
