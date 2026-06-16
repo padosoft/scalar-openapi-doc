@@ -28,7 +28,8 @@ This app exposes internal APIs through a safe, filter-on-the-fly docs layer:
 
 - authenticate users with Fortify (`admin`, `user` roles),
 - define what each user can see (tags + operation grants),
-- serve only the granted operations from `openapi.json`,
+- define which playground servers each user can use (per-user server grants, deny-by-default),
+- serve only the granted operations and granted servers from `openapi.json`,
 - and block direct access to unauthorized routes and actions in both backend and UI.
 
 The **full spec is never sent to non-admin users**; filtering happens server-side.
@@ -39,6 +40,8 @@ The **full spec is never sent to non-admin users**; filtering happens server-sid
   - A user receives only operations authorized by tags/endpoint grants.
 - **UNION semantics for grants**
   - `tag` grant OR `endpoint` grant authorization is enough to keep an operation.
+- **Per-user server grants (deny-by-default)**
+  - Each user sees only the playground servers granted to them; admins see all active servers, and a user with no grants sees none.
 - **Transitive component pruning**
   - Full `$ref`/callback/webhook/schema reachability pruning avoids hidden-component leaks and dangling references.
 - **Anti-tampering grant validation**
@@ -54,10 +57,10 @@ The **full spec is never sent to non-admin users**; filtering happens server-sid
 - `/scalar` docs page behind role checks.
 - `/api-docs/openapi.json` proxy endpoint:
   - filters spec per viewer grants,
-  - injects only active playground servers,
+  - injects only the active playground servers granted to the viewer (admins see all active; users see only their grants; none ⇒ no servers),
   - always returns `Cache-Control: private, no-store`.
 - Admin dashboard:
-  - users CRUD + grant management (tags/endpoints),
+  - users CRUD + grant management (tags/endpoints/servers),
   - server catalog management,
   - authentication log viewer,
   - cache flush UI.
@@ -163,6 +166,7 @@ CI=1 npx playwright test
 - `auth` and role checks are enforced in routes/controllers.
 - The client never decides authorization; backend decides what to expose.
 - Grants are normalized and validated against the current spec before save.
+- Per-user server grants are deny-by-default and anti-tampered server-side (only active or already-assigned servers are grantable); injected servers are filtered per viewer.
 - Spec proxy is hardened with host/scheme allow-lists, method allow-lists, and malformed-server filtering.
 - Auth events are immutable and logged server-side.
 
@@ -171,6 +175,7 @@ CI=1 npx playwright test
 - [x] Core auth + RBAC + role-based permissions
 - [x] Server-side filtering + scalar proxy
 - [x] Admin user + server + auth-log management
+- [x] Per-user server grants (deny-by-default)
 - [x] Hardening + full E2E + security polish
 - [x] WOW README and release knowledge consolidation
 
