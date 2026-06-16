@@ -336,3 +336,12 @@ Implementation is in `task/admin-users` on top of `main`, with anti-tampering an
 - This satisfies T9.3 release packaging after roadmap completion.
 - Added user-facing release notes file: [`CHANGELOG.md`](./CHANGELOG.md) with v1.0.0 highlights:
   - OpenAPI server-side filtering, RBAC/admin UX, anti-tampering grants, hardening, and quality gates.
+
+## Post-1.0.0 — branch `fix/scalar-fullpage-link` (→ `main`, release v1.0.1)
+Deploy-found bug + branding polish (user-requested):
+- **Bug:** sidebar "API Reference" opened a blank white modal. Root cause: it used Inertia `<Link>` for `/scalar`, which is a non-Inertia page (scalar/laravel) → Inertia rendered it in its sandboxed error-modal iframe (opaque origin) → Scalar's spec fetch blocked. Fix: `NavItem.external` flag; `NavMain` renders a native full-page `<a>` for external routes. See LESSON `[ui/inertia-link-to-non-inertia-route]`.
+- **Branding:** removed "Repository"/"Documentation" footer links (deleted dead `nav-footer.tsx`); renamed app + sidebar header to **API DOCS** (`app-logo`, `.env.example`, `config/app.php` fallback); replaced the Laravel logo/favicon with a custom `</>` mark (`app-logo-icon.tsx`, `public/favicon.svg`); removed Laravel `favicon.ico`/`apple-touch-icon.png`.
+- **Home:** `/` now redirects to `dashboard` (auth) or `login` (guest) — the marketing welcome page is no longer reachable. Replaced starter `ExampleTest` with `HomeRedirectTest`; updated stale phpstan-baseline count (one `Route::inertia(...)->name()` mixed call removed).
+- **Guardrails:** `nav-main.test.tsx` (Vitest) asserts external items render a native anchor; Playwright asserts the API Reference link does a full-page navigation to the real Scalar page (URL `/scalar`, Scalar CDN `<script>` present, no `iframe[srcdoc]`); `HomeRedirectTest` covers the redirect both ways.
+- **Gates (all green):** pint, phpstan max (0), `php artisan test` 214 pass/1 skip, vitest 14, build, format:check, lint, tsc 0, `npx playwright test` 16 passed. Local e2e ran via `.env.testing` (sqlite/array) because `php artisan serve` drops process-env on this Windows PHP — see LESSON `[windows/artisan-serve-drops-process-env-in-e2e]`.
+- **Open question raised by user (not in this branch):** per-user **server** grants (a "Granted Servers" selector on the user form). Currently `scalar_servers` are injected globally for all viewers; there is no `user_allowed_servers`. This is a new feature, scoped separately pending the user's decision.

@@ -2,14 +2,12 @@ import { Link, usePage } from '@inertiajs/react';
 import {
     BookOpen,
     Database,
-    FolderGit2,
     LayoutGrid,
     Logs,
     MonitorDot,
     Shield,
 } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
-import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
 import { NavUser } from '@/components/nav-user';
 import {
@@ -32,19 +30,6 @@ const mainNavItems: NavItem[] = [
     },
 ];
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Repository',
-        href: 'https://github.com/laravel/react-starter-kit',
-        icon: FolderGit2,
-    },
-    {
-        title: 'Documentation',
-        href: 'https://laravel.com/docs/starter-kits#react',
-        icon: BookOpen,
-    },
-];
-
 export function AppSidebar() {
     const { auth } = usePage().props;
     const navItems: NavItem[] = [...mainNavItems];
@@ -54,6 +39,10 @@ export function AppSidebar() {
             title: 'API Reference',
             href: '/scalar',
             icon: BookOpen,
+            // `/scalar` is rendered by the scalar/laravel package, not Inertia.
+            // Use a full-page navigation so Scalar loads on the real origin and
+            // can fetch the spec (an Inertia visit shows a blank error modal).
+            external: true,
         });
     }
 
@@ -99,7 +88,6 @@ export function AppSidebar() {
             </SidebarContent>
 
             <SidebarFooter>
-                <NavFooter items={footerNavItems} className="mt-auto" />
                 <NavUser />
             </SidebarFooter>
         </Sidebar>
