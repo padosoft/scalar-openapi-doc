@@ -25,7 +25,7 @@ class UserController extends Controller
     public function index(): Response
     {
         return Inertia::render('admin/users/index', [
-            'users' => $this->serializeUsers(User::with(['roles', 'allowedTags', 'allowedEndpoints'])->orderByDesc('id')->get()),
+            'users' => $this->serializeUsers(User::with(['roles', 'allowedTags', 'allowedEndpoints', 'allowedServers'])->orderByDesc('id')->get()),
         ]);
     }
 
@@ -209,6 +209,7 @@ class UserController extends Controller
                         ->map(fn ($endpoint): string => $endpoint->method->value.' '.$endpoint->path)
                         ->values()
                         ->all(),
+                    'servers' => $user->allowedServers->count(),
                 ],
             ];
         }

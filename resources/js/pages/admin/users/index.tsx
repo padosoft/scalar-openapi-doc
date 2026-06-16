@@ -13,6 +13,7 @@ type AdminUserRow = {
     grants: {
         tags: string[];
         endpoints: string[];
+        servers: number;
     };
 };
 
@@ -47,6 +48,7 @@ export default function UsersIndex() {
                 <div>
                     <p>Tags: {row.grants.tags.join(', ') || '—'}</p>
                     <p>Endpoints: {row.grants.endpoints.length} selected</p>
+                    <p>Servers: {row.grants.servers} selected</p>
                 </div>
             ),
         },

@@ -9,8 +9,10 @@ use App\Models\ScalarServer;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -28,6 +30,33 @@ class AdminUserManagementTest extends TestCase
 
         $this->actingAs($admin)->get('/admin/users')->assertOk();
         $this->actingAs($viewer)->get('/admin/users')->assertForbidden();
+    }
+
+    public function test_admin_users_index_serializes_granted_server_count(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $admin = $this->createAdmin();
+
+        $serverIds = [
+            ScalarServer::create(['url' => 'https://one.local', 'description' => 'One', 'sort_order' => 1, 'is_active' => true])->id,
+            ScalarServer::create(['url' => 'https://two.local', 'description' => 'Two', 'sort_order' => 2, 'is_active' => true])->id,
+        ];
+
+        $grantee = User::factory()->create();
+        $grantee->assignRole(Role::findOrCreate('user', 'web'));
+        $grantee->allowedServers()->sync($serverIds);
+
+        $this->actingAs($admin)
+            ->get('/admin/users')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('admin/users/index')
+                ->where(
+                    'users',
+                    fn (Collection $users): bool => $users
+                        ->firstWhere('id', $grantee->id)['grants']['servers'] === 2
+                )
+            );
     }
 
     public function test_admin_can_create_users_with_valid_grants(): void
