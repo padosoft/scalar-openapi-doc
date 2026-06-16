@@ -36,7 +36,9 @@ final class AuthLogController extends Controller
 
         $end = $request->query('end_date');
         if (is_string($end) && $end !== '') {
-            $endDate = Carbon::parse($end);
+            // A date-only value (e.g. "2026-06-16") parses to midnight; extend it
+            // to the end of that day so the range is inclusive of the whole day.
+            $endDate = Carbon::parse($end)->endOfDay();
             $query->where('created_at', '<=', $endDate);
         }
 

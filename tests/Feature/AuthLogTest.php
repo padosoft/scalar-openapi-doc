@@ -107,6 +107,72 @@ final class AuthLogTest extends TestCase
             );
     }
 
+    public function test_login_and_logout_are_logged_even_without_a_queue_worker(): void
+    {
+        // Production runs QUEUE_CONNECTION=database with no always-on worker.
+        // The login/logout listeners must persist synchronously, otherwise only
+        // the (synchronous) failed-login row is ever written. Regression guard
+        // for the audit trail showing "failed only".
+        config()->set('queue.default', 'database');
+
+        $user = User::factory()->create();
+
+        $this->post(route('login.store'), [
+            'email' => $user->email,
+            'password' => 'password',
+        ]);
+        $this->assertDatabaseHas('auth_logs', [
+            'user_id' => $user->id,
+            'event' => AuthEvent::Login->value,
+        ]);
+
+        $this->actingAs($user)->post(route('logout'));
+        $this->assertDatabaseHas('auth_logs', [
+            'user_id' => $user->id,
+            'event' => AuthEvent::Logout->value,
+        ]);
+    }
+
+    public function test_admin_sees_logout_and_failed_events_for_all_users(): void
+    {
+        $adminRole = (string) config('openapi.admin_role', 'admin');
+        $this->seed(DatabaseSeeder::class);
+
+        $admin = User::factory()->create();
+        $admin->assignRole($adminRole);
+
+        $other = User::factory()->create();
+
+        AuthLog::query()->insert([
+            [
+                'user_id' => $other->id,
+                'email' => $other->email,
+                'event' => AuthEvent::Logout->value,
+                'ip_address' => '127.0.0.1',
+                'user_agent' => 'phpunit',
+                'created_at' => now(),
+            ],
+            [
+                'user_id' => $admin->id,
+                'email' => $admin->email,
+                'event' => AuthEvent::Login->value,
+                'ip_address' => '127.0.0.1',
+                'user_agent' => 'phpunit',
+                'created_at' => now(),
+            ],
+        ]);
+
+        // Filtering by logout returns the OTHER user's row — admins see everyone.
+        $this->actingAs($admin)
+            ->get('/auth-logs?event=logout')
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('rows.total', 1)
+                ->where('rows.data.0.event', AuthEvent::Logout->value)
+                ->where('rows.data.0.email', $other->email)
+            );
+    }
+
     public function test_auth_logs_prune_command_removes_stale_rows(): void
     {
         Carbon::setTestNow(Carbon::parse('2026-06-15 09:00:00'));
