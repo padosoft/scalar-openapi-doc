@@ -62,10 +62,12 @@ describe('NavMain', () => {
         const internal = screen.getByRole('link', { name: 'Dashboard' });
         expect(internal).toHaveAttribute('data-link-type', 'inertia');
 
-        // External item is a plain anchor → full page navigation to /scalar.
+        // External item is a plain anchor opening /scalar in a new tab.
         const external = screen.getByRole('link', { name: 'API Reference' });
         expect(external).toHaveAttribute('href', '/scalar');
         expect(external).not.toHaveAttribute('data-link-type');
+        expect(external).toHaveAttribute('target', '_blank');
+        expect(external).toHaveAttribute('rel', 'noopener noreferrer');
     });
 
     it('passes isActive=true only to the item whose href matches the current URL', () => {
