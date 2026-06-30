@@ -106,6 +106,12 @@ final class OpenApiDocsController extends Controller
      * in its description, so the Scalar UI renders a clear "unavailable" page
      * (and shows what the load returned) instead of breaking.
      *
+     * Deliberate product decision: the technical detail (failure category, HTTP
+     * status, exception class, redacted message) is shown to ALL authenticated
+     * users, not just admins — this is an authenticated-only portal and the
+     * message is already redacted of hosts/URLs/tokens by OpenApiSpecService, so
+     * only a low-sensitivity PHP class name is exposed.
+     *
      * @return array<string, mixed>
      */
     private function unavailableDocument(SpecFailure $failure): array
