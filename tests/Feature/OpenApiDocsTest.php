@@ -11,6 +11,7 @@ use App\Models\UserAllowedTag;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
@@ -215,6 +216,37 @@ class OpenApiDocsTest extends TestCase
         config(['openapi.viewer_roles' => [...(array) config('openapi.viewer_roles', []), $fallbackRole]]);
 
         return $fallbackRole;
+    }
+
+    public function test_docs_endpoint_serves_a_valid_unavailable_document_when_spec_cannot_load(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        config([
+            // Pin the spec cache to the default store the Cache facade clears below;
+            // an env-set OPENAPI_CACHE_STORE would otherwise divert the service.
+            'openapi.cache_store' => null,
+            'openapi.cache_key' => 'docs-unavailable-raw',
+            'openapi.stale_key' => 'docs-unavailable-stale',
+            'openapi.upstream_url' => 'http://127.0.0.1:1/openapi.json',
+            'openapi.allowed_hosts' => ['127.0.0.1'],
+            'openapi.allowed_schemes' => ['http'],
+        ]);
+        Cache::forget('docs-unavailable-raw');
+        Cache::forget('docs-unavailable-stale');
+        Http::fake(['http://127.0.0.1:1/openapi.json' => Http::response([], 500)]);
+
+        $user = User::factory()->create();
+        $user->assignRole($this->viewerRole());
+
+        $response = $this->actingAs($user)->get('/api-docs/openapi.json');
+
+        $response->assertOk();
+        $payload = $response->json();
+        $this->assertSame('3.1.0', $payload['openapi']);
+        $this->assertStringContainsString('temporarily unavailable', $payload['info']['title']);
+        $this->assertStringContainsString('Upstream API error', $payload['info']['description']);
+        $this->assertArrayHasKey('paths', $payload);
+        $this->assertSame([], $payload['paths']);
     }
 
     private function seedOpenApiSpec(): void

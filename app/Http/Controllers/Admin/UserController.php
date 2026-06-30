@@ -11,6 +11,8 @@ use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\ScalarServer;
 use App\Models\User;
 use App\Services\OpenApiSpecService;
+use App\Support\OpenApi\SpecFailure;
+use App\Support\OpenApi\SpecFailureCategory;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Hash;
@@ -31,10 +33,13 @@ class UserController extends Controller
 
     public function create(OpenApiSpecService $openApiSpecService): Response
     {
+        $state = $this->openApiCatalogState($openApiSpecService);
+
         return Inertia::render('admin/users/form', [
             'user' => null,
             'roles' => $this->allRoles(),
-            'openapi' => $this->catalogOrEmpty($openApiSpecService),
+            'openapi' => $state['openapi'],
+            'openapiStatus' => $state['openapiStatus'],
             'servers' => $this->serverCatalog(),
         ]);
     }
@@ -58,6 +63,8 @@ class UserController extends Controller
 
     public function edit(User $user, OpenApiSpecService $openApiSpecService): Response
     {
+        $state = $this->openApiCatalogState($openApiSpecService, $user);
+
         return Inertia::render('admin/users/form', [
             'user' => [
                 'id' => $user->id,
@@ -77,7 +84,8 @@ class UserController extends Controller
                 ],
             ],
             'roles' => $this->allRoles(),
-            'openapi' => $this->catalogOrEmpty($openApiSpecService, $user),
+            'openapi' => $state['openapi'],
+            'openapiStatus' => $state['openapiStatus'],
             'servers' => $this->serverCatalog($user),
         ]);
     }
@@ -225,14 +233,14 @@ class UserController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $spec
      * @return array{
      *     tags: list<array{value: string, label: string}>,
      *     endpoints: list<array{value: string, label: string}>
      * }
      */
-    private function serializeOpenApiCatalog(OpenApiSpecService $service): array
+    private function serializeOpenApiCatalog(OpenApiSpecService $service, array $spec): array
     {
-        $spec = $service->fetchRaw();
         $tags = $service->extractTags($spec);
         $endpoints = $service->extractEndpoints($spec);
 
@@ -326,29 +334,54 @@ class UserController extends Controller
     }
 
     /**
-     * OpenAPI UI catalog is optional for UX: when upstream metadata is
-     * unavailable, render the form with empty grant options instead of failing
-     * the whole page (grants are still validated server-side).
+     * The OpenAPI catalog is optional for UX: when it can't be loaded (DB/cache
+     * down, upstream unreachable, invalid payload) the form still renders with
+     * the user's existing grants as the only options, plus an `openapiStatus`
+     * flag so the UI can warn that fresh options are unavailable. Grants remain
+     * validated server-side on save, so degraded mode never weakens security.
      *
-     * @return array{tags: list<array{value:string,label:string}>, endpoints: list<array{value:string,label:string}>}
+     * @return array{
+     *     openapi: array{tags: list<array{value:string,label:string}>, endpoints: list<array{value:string,label:string}>},
+     *     openapiStatus: array{ok: bool, failure?: array{category: string, label: string, httpStatus: int|null, exceptionClass: string, message: string}}
+     * }
      */
-    private function catalogOrEmpty(OpenApiSpecService $service, ?User $user = null): array
+    private function openApiCatalogState(OpenApiSpecService $service, ?User $user = null): array
     {
-        try {
-            $catalog = $this->serializeOpenApiCatalog($service);
-            $userCatalog = $this->userGrantCatalog($user);
+        $userCatalog = $this->userGrantCatalog($user);
+        $result = $service->tryFetchRaw();
 
+        if (! $result->ok()) {
             return [
-                'tags' => $this->mergeCatalogOptions($catalog['tags'], $userCatalog['tags']),
-                'endpoints' => $this->mergeCatalogOptions($catalog['endpoints'], $userCatalog['endpoints']),
+                'openapi' => $userCatalog,
+                'openapiStatus' => ['ok' => false, 'failure' => $result->failureOrFail()->toArray()],
             ];
+        }
+
+        try {
+            $catalog = $this->serializeOpenApiCatalog($service, $result->specOrFail());
         } catch (\Throwable $exception) {
-            Log::warning('Unable to load OpenAPI catalog for user grants UI', [
+            // Defensive: the spec passed validation before caching, so extraction
+            // should not throw — but never let a malformed edge case crash the
+            // page. Logging is safe here (the prod stack ignores handler failures).
+            Log::warning('Unable to serialize OpenAPI catalog for user grants UI', [
                 'exception' => $exception::class,
             ]);
 
-            return $this->userGrantCatalog($user);
+            $failure = new SpecFailure(SpecFailureCategory::Unknown, $exception::class, '');
+
+            return [
+                'openapi' => $userCatalog,
+                'openapiStatus' => ['ok' => false, 'failure' => $failure->toArray()],
+            ];
         }
+
+        return [
+            'openapi' => [
+                'tags' => $this->mergeCatalogOptions($catalog['tags'], $userCatalog['tags']),
+                'endpoints' => $this->mergeCatalogOptions($catalog['endpoints'], $userCatalog['endpoints']),
+            ],
+            'openapiStatus' => ['ok' => true],
+        ];
     }
 
     /**

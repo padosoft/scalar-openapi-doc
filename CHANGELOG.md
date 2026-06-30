@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.8 — 2026-06-30
+
+### Fixed
+- **The portal no longer 500s when its own infrastructure hiccups.** Production hit a dropped Aurora connection during a DB-backed cache write (`SQLSTATE[HY000] 2013 Lost connection ... 'handshake'`), and the log socket was down too (`Could not write to socket`) — so opening the API docs **or** a user edit page returned a raw 500. Root cause was infra (DB + logging), not the external Scalar API. Hardened end-to-end:
+  - **Spec loading never throws.** `OpenApiSpecService::tryFetchRaw()` returns a categorized, **redacted** result (`Database` / `ExternalApi` / `InvalidSpec` / `Unknown`) instead of an exception. A successful upstream fetch is no longer discarded when persisting it to the cache fails.
+  - **Docs page degrades to a clear message.** When the spec can't be loaded, `/api-docs/openapi.json` returns a valid HTTP 200 "⚠️ API documentation temporarily unavailable" OpenAPI document (reason in the description) so Scalar renders a clean page instead of breaking.
+  - **User create/edit degrades, never crashes.** The form shows a non-blocking warning banner when the grant catalog is unavailable; name/email/role/password stay editable and existing grants remain selectable (grants are still re-validated server-side).
+  - **A dead log channel can't crash a request.** The production log `stack` now sets `ignore_exceptions=true` (Monolog `WhatFailureGroupHandler`).
+  - **A lost DB connection renders one clean 503 page** app-wide (shown at login and everywhere) instead of a stack trace.
+- **Security:** failure detail surfaced to users is always redacted — never the DB host, SQL, upstream URL, or auth token. Only the category label, HTTP status, and framework exception class are shown.
+
+### Changed
+- **Spec cache can live off the database.** New `OPENAPI_CACHE_STORE` (default: app cache store). Set it to `file` in production to keep the large OpenAPI document (hundreds of KB) off a DB-backed store at no extra infrastructure cost — the copy is rebuildable, so a cache miss simply re-fetches from upstream.
+
 ## v1.0.7 — 2026-06-16
 
 ### Fixed

@@ -5,11 +5,19 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Exceptions\InvalidOpenApiSpecException;
+use App\Support\OpenApi\SpecFailure;
+use App\Support\OpenApi\SpecFailureCategory;
+use App\Support\OpenApi\SpecFetchResult;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use PDOException;
 use Throwable;
 
 /**
@@ -63,7 +71,7 @@ final class OpenApiSpecService
      */
     public function fetchRaw(): array
     {
-        $cached = Cache::get($this->cacheKey());
+        $cached = $this->cache()->get($this->cacheKey());
 
         if (is_array($cached)) {
             /** @var array<string, mixed> $cached */
@@ -71,6 +79,54 @@ final class OpenApiSpecService
         }
 
         return $this->refreshFromUpstream();
+    }
+
+    /**
+     * Non-throwing variant of fetchRaw(): returns the spec on success, or a
+     * categorized (already-redacted) SpecFailure. Callers that must degrade
+     * gracefully (docs page, user-grants form) use this instead of catching the
+     * raw Throwable themselves. Stale-on-error still applies — a present stale
+     * copy yields a successful result.
+     */
+    public function tryFetchRaw(): SpecFetchResult
+    {
+        try {
+            return SpecFetchResult::success($this->fetchRaw());
+        } catch (Throwable $e) {
+            return SpecFetchResult::failure($this->categorizeFailure($e));
+        }
+    }
+
+    /**
+     * Maps a spec-load failure to a category + UI-safe detail.
+     *
+     * Security: the raw exception message is NEVER surfaced. A QueryException's
+     * message embeds the DB host + SQL, a ConnectionException's the upstream
+     * host:port, and an SSRF-guard message the rejected host — none of which a
+     * URL-only redactor would strip. Since SpecFailure is shown to
+     * every authenticated user (docs page + grants form), the message is a fixed,
+     * category-specific sentence; the diagnostic signal is the category label,
+     * the HTTP status (upstream errors only) and the framework exception class.
+     */
+    private function categorizeFailure(Throwable $e): SpecFailure
+    {
+        if ($e instanceof QueryException || $e instanceof PDOException) {
+            return new SpecFailure(SpecFailureCategory::Database, $e::class, 'The database is temporarily unreachable.');
+        }
+
+        if ($e instanceof RequestException) {
+            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, 'The upstream API request failed.', $e->response->status());
+        }
+
+        if ($e instanceof ConnectionException) {
+            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, 'The upstream API could not be reached.');
+        }
+
+        if ($e instanceof InvalidOpenApiSpecException) {
+            return new SpecFailure(SpecFailureCategory::InvalidSpec, $e::class, 'The upstream returned an invalid OpenAPI document.');
+        }
+
+        return new SpecFailure(SpecFailureCategory::Unknown, $e::class, 'An unexpected error occurred while loading the documentation.');
     }
 
     /**
@@ -82,10 +138,11 @@ final class OpenApiSpecService
      */
     public function flushCache(bool $includeStale = false, ?int $actorId = null): void
     {
-        Cache::forget($this->cacheKey());
+        $cache = $this->cache();
+        $cache->forget($this->cacheKey());
 
         if ($includeStale) {
-            Cache::forget($this->staleKey());
+            $cache->forget($this->staleKey());
         }
 
         Log::info('OpenAPI spec cache flushed', [
@@ -130,29 +187,56 @@ final class OpenApiSpecService
             // OpenAPI document (B3). Otherwise fall through to the stale copy.
             $this->assertValidSpec($spec);
 
-            Cache::put($this->cacheKey(), $spec, Config::integer('openapi.cache_ttl', 3600));
-            Cache::forever($this->staleKey(), $spec);
+            // Persisting must NOT discard a spec we just fetched successfully: a
+            // cache-write failure (DB-backed cache unreachable, or the large
+            // serialized spec exceeding a packet/row limit) is logged and ignored.
+            $this->persistSpec($spec);
 
             /** @var array<string, mixed> $spec */
             return $spec;
         } catch (Throwable $e) {
-            // Redact: the upstream URL may carry userinfo/signed query params, and
-            // the HTTP client's exception message embeds the full request URI —
-            // never write those secrets to the logs.
+            // Safe fields only: the upstream URL is redacted (it may carry
+            // userinfo/signed query params), and the raw exception message is
+            // omitted entirely. A ConnectionException/cURL failure embeds host:port
+            // (no scheme) and other infra detail that a URL-only redactor would not
+            // strip, so logging the message would leak it.
             Log::error('OpenAPI upstream spec fetch failed', [
                 'url' => $this->redactUrl($url),
                 'exception' => $e::class,
-                'message' => $this->redactMessage($e->getMessage()),
             ]);
 
             // Stale-on-error: serve the last known-good copy if we have one.
-            $stale = Cache::get($this->staleKey());
+            $stale = $this->cache()->get($this->staleKey());
             if (is_array($stale)) {
                 /** @var array<string, mixed> $stale */
                 return $stale;
             }
 
             throw $e;
+        }
+    }
+
+    /**
+     * Writes the spec to the expiring cache + the never-expiring stale copy.
+     * A write failure is swallowed (logged, redacted) so a freshly-fetched spec
+     * is never discarded just because the cache backend is unavailable — the
+     * portal then re-fetches per request, which is far better than a hard error.
+     *
+     * @param  array<array-key, mixed>  $spec
+     */
+    private function persistSpec(array $spec): void
+    {
+        try {
+            $cache = $this->cache();
+            $cache->put($this->cacheKey(), $spec, Config::integer('openapi.cache_ttl', 3600));
+            $cache->forever($this->staleKey(), $spec);
+        } catch (Throwable $e) {
+            // Class only: a cache-write QueryException embeds the DB host, SQL and
+            // even serialized spec content, none of which a URL-only redactor would
+            // strip — so the raw message is never written to the logs.
+            Log::warning('OpenAPI spec fetched but could not be cached', [
+                'exception' => $e::class,
+            ]);
         }
     }
 
@@ -2260,23 +2344,6 @@ final class OpenApiSpecService
     }
 
     /**
-     * Strips userinfo and query/fragment from any http(s) URL embedded in a
-     * string (e.g. an HTTP client's exception message), so secrets in the
-     * upstream URI never reach the logs.
-     */
-    private function redactMessage(string $message): string
-    {
-        // Userinfo group is greedy up to the LAST '@' before the path delimiter,
-        // so a password that itself contains '@' (e.g. user:p@ss@host, which PHP
-        // accepts) is fully stripped, not just up to the first '@'.
-        return (string) preg_replace(
-            '~(https?://)(?:[^/\s?#]*@)?([^/\s?#]+)([^\s?#]*)[^\s]*~i',
-            '$1$2$3',
-            $message
-        );
-    }
-
-    /**
      * The components.pathItems map (OpenAPI 3.1 reusable path items), or [].
      *
      * @param  array<array-key, mixed>  $spec
@@ -2420,6 +2487,19 @@ final class OpenApiSpecService
     private function asArray(mixed $value): array
     {
         return is_array($value) ? $value : [];
+    }
+
+    /**
+     * The cache repository backing the spec copies. A dedicated store
+     * (openapi.cache_store) lets the large spec live off the app's default
+     * store — e.g. on `file` instead of a DB-backed default — without changing
+     * caching for the rest of the app. Null falls back to the default store.
+     */
+    private function cache(): Repository
+    {
+        $store = config('openapi.cache_store');
+
+        return Cache::store(is_string($store) && $store !== '' ? $store : null);
     }
 
     private function cacheKey(): string

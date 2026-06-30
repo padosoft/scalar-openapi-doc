@@ -2,6 +2,7 @@ import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { useMemo } from 'react';
 import InputError from '@/components/input-error';
 import { MultiSelect } from '@/components/multi-select';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,16 +26,31 @@ type GrantsCatalog = {
 
 type ServerOption = { value: string; label: string };
 
+type OpenApiFailure = {
+    category: string;
+    label: string;
+    httpStatus: number | null;
+    exceptionClass: string;
+    message: string;
+};
+
+// Discriminated union: `failure` is guaranteed present exactly when `ok` is
+// false, so the banner can read it without an extra optional check.
+type OpenApiStatus = { ok: true } | { ok: false; failure: OpenApiFailure };
+
 type UserFormProps = {
     user: UserPayload | null;
     roles: string[];
     openapi: GrantsCatalog;
+    openapiStatus: OpenApiStatus;
     servers: ServerOption[];
 };
 
 export default function UserForm() {
-    const { user, roles, openapi, servers } = usePage<UserFormProps>().props;
+    const { user, roles, openapi, openapiStatus, servers } =
+        usePage<UserFormProps>().props;
     const isEdit = user !== null;
+    const openapiFailure = openapiStatus.ok ? undefined : openapiStatus.failure;
 
     const endpointOptions = useMemo(
         () =>
@@ -152,6 +168,35 @@ export default function UserForm() {
                     </select>
                     <InputError message={form.errors.role} />
                 </div>
+
+                {openapiFailure && (
+                    <Alert
+                        variant="destructive"
+                        data-testid="openapi-status-warning"
+                    >
+                        <AlertTitle>
+                            API documentation options unavailable
+                        </AlertTitle>
+                        <AlertDescription>
+                            <p>
+                                Tag and endpoint options couldn&rsquo;t be
+                                loaded, so those pickers may be empty or limited
+                                to grants already assigned. You can still edit
+                                the other fields and save &mdash; grants are
+                                re-validated on the server.
+                            </p>
+                            <p className="text-xs">
+                                Reason: {openapiFailure.label}
+                                {openapiFailure.httpStatus !== null &&
+                                    ` (HTTP ${openapiFailure.httpStatus})`}
+                                {' — '}
+                                {openapiFailure.exceptionClass}
+                                {openapiFailure.message &&
+                                    `: ${openapiFailure.message}`}
+                            </p>
+                        </AlertDescription>
+                    </Alert>
+                )}
 
                 <MultiSelect
                     label="Granted tags"

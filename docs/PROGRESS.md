@@ -2,8 +2,10 @@
 
 This is the resume point. If a session dies, the next agent reads this file (plus `AGENTS.md`, `docs/RULES.md`, `docs/LESSON.md`) and continues exactly from here. Update it after every meaningful step. Newest entries at the bottom of each task.
 
-> **⚠️ Active blocker (2026-06-13): GitHub Copilot reviewer unavailable org-wide.**
-> The Copilot org spend limit is reached (`additional_spend_limit_reached`, HTTP 402): the **local** `copilot` CLI returns 402 AND the **remote** Copilot PR reviewer bot no longer attaches (re-requests leave `requested_reviewers` empty). **Codex remote review still works** and CI is green. Per the amended AGENTS.md, binding review continues via **Codex + CI + local gates** (pint, phpstan max, pest, vitest, build); each merge is gated on those. **Action for the owner:** raise/clear the Copilot spend limit at github.com/settings/copilot/features to restore Copilot reviews. Until then, Copilot-review is treated as unavailable (documented per-PR).
+> **✅ Update (2026-06-30): Copilot reviews are working again.** On PRs #30/#31 the remote Copilot reviewer attached and posted substantive inline comments (all addressed). The local `copilot` CLI also runs — but it **mutates files despite a "report findings only" prompt** (`--yolo`), so its output is advisory only (revert with `git checkout --`, evaluate on merit). The 2026-06-13 spend-limit blocker below is historical.
+>
+> **⚠️ Historical blocker (2026-06-13): GitHub Copilot reviewer unavailable org-wide.**
+> The Copilot org spend limit was reached (`additional_spend_limit_reached`, HTTP 402): the **local** `copilot` CLI returned 402 AND the **remote** Copilot PR reviewer bot no longer attached (re-requests left `requested_reviewers` empty). **Codex remote review still worked** and CI was green. Per the amended AGENTS.md, binding review continued via **Codex + CI + local gates** (pint, phpstan max, pest, vitest, build).
 
 ## Macro Task Status
 
@@ -18,6 +20,7 @@ This is the resume point. If a session dies, the next agent reads this file (plu
 | T7 | Servers + audit | `task/admin-servers-audit` | 🟢 merged (macro PR #19 → `main`, `699258a`) | #19 |
 | T8 | Hardening & polish | `task/hardening-polish` | 🟢 complete (local) | — |
 | T9 | Release | `task/release` | 🟢 complete | — |
+| RD | Resilient degradation (spec/DB/log failures) | `task/resilient-degradation` | 🟢 subtasks merged (PR #30 backend, #31 frontend); macro PR → `main` in progress | — |
 
 Legend: ⚪ pending · 🟡 in progress · 🟢 complete.
 
