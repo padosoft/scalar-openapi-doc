@@ -307,6 +307,56 @@ class AdminUserManagementTest extends TestCase
         )->all());
     }
 
+    public function test_edit_form_reports_openapi_unavailable_and_still_renders(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $admin = $this->createAdmin();
+
+        $cacheKey = 'admin-users-openapi-edit-unavailable';
+        config([
+            'openapi.cache_key' => $cacheKey,
+            'openapi.stale_key' => "{$cacheKey}-stale",
+            'openapi.upstream_url' => 'http://127.0.0.1:1/openapi.json',
+            'openapi.allowed_hosts' => ['127.0.0.1'],
+            'openapi.allowed_schemes' => ['http'],
+        ]);
+        Cache::forget($cacheKey);
+        Cache::forget("{$cacheKey}-stale");
+        Http::fake(['http://127.0.0.1:1/openapi.json' => Http::response([], 500)]);
+
+        $user = User::factory()->create();
+        $user->assignRole('user');
+        $user->allowedTags()->create(['tag' => 'Catalog']);
+
+        $response = $this->actingAs($admin)->get('/admin/users/'.$user->id.'/edit');
+
+        $response->assertOk();
+        $response->assertInertia(
+            fn (Assert $page): Assert => $page
+                ->component('admin/users/form')
+                ->where('openapiStatus.ok', false)
+                ->where('openapiStatus.failure.category', 'external_api')
+                // Degraded mode still offers the user's existing grants as options.
+                ->where('openapi.tags', [['value' => 'Catalog', 'label' => 'Catalog']])
+        );
+    }
+
+    public function test_create_form_reports_openapi_available_when_catalog_loads(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $admin = $this->createAdmin();
+        $this->seedOpenApiSpec();
+
+        $response = $this->actingAs($admin)->get('/admin/users/create');
+
+        $response->assertOk();
+        $response->assertInertia(
+            fn (Assert $page): Assert => $page
+                ->component('admin/users/form')
+                ->where('openapiStatus.ok', true)
+        );
+    }
+
     public function test_admin_cannot_delete_the_last_administrator(): void
     {
         $admin = $this->createAdmin();

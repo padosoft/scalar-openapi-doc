@@ -77,15 +77,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Cache (Redis in production; driver-agnostic via the Cache facade)
+    | Cache (driver-agnostic via the Cache facade)
     |--------------------------------------------------------------------------
     |
+    | cache_store -> which cache store backs the spec copies. Null = the app's
+    | default store. The OpenAPI document is large (hundreds of KB), so on a
+    | DB-backed default store it is serialized into the database on every
+    | refresh — heavy for a serverless DB (e.g. Aurora) and it couples the docs
+    | portal's availability to the DB. Set OPENAPI_CACHE_STORE=file in
+    | production to keep the spec off the DB at zero infra cost (the copy is
+    | rebuildable: a cache miss simply re-fetches from upstream).
     | cache_ttl  -> TTL (seconds) of the cached upstream copy (default 1h).
     | cache_key  -> expiring copy; stale_key -> never-expiring emergency copy
     | served on upstream failure (stale-on-error).
     |
     */
 
+    'cache_store' => env('OPENAPI_CACHE_STORE') ?: null,
     'cache_ttl' => (int) env('OPENAPI_CACHE_TTL', 3600),
     'cache_key' => 'openapi:spec:raw',
     'stale_key' => 'openapi:spec:stale',

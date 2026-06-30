@@ -5,11 +5,19 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Exceptions\InvalidOpenApiSpecException;
+use App\Support\OpenApi\SpecFailure;
+use App\Support\OpenApi\SpecFailureCategory;
+use App\Support\OpenApi\SpecFetchResult;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Database\QueryException;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use PDOException;
 use Throwable;
 
 /**
@@ -63,7 +71,7 @@ final class OpenApiSpecService
      */
     public function fetchRaw(): array
     {
-        $cached = Cache::get($this->cacheKey());
+        $cached = $this->cache()->get($this->cacheKey());
 
         if (is_array($cached)) {
             /** @var array<string, mixed> $cached */
@@ -71,6 +79,50 @@ final class OpenApiSpecService
         }
 
         return $this->refreshFromUpstream();
+    }
+
+    /**
+     * Non-throwing variant of fetchRaw(): returns the spec on success, or a
+     * categorized (already-redacted) SpecFailure. Callers that must degrade
+     * gracefully (docs page, user-grants form) use this instead of catching the
+     * raw Throwable themselves. Stale-on-error still applies — a present stale
+     * copy yields a successful result.
+     */
+    public function tryFetchRaw(): SpecFetchResult
+    {
+        try {
+            return SpecFetchResult::success($this->fetchRaw());
+        } catch (Throwable $e) {
+            return SpecFetchResult::failure($this->categorizeFailure($e));
+        }
+    }
+
+    /**
+     * Maps a spec-load failure to a category + redacted detail. The message is
+     * redacted (no upstream URL / DB host / token); the HTTP status is filled
+     * only for an upstream HTTP error.
+     */
+    private function categorizeFailure(Throwable $e): SpecFailure
+    {
+        $message = $this->redactMessage($e->getMessage());
+
+        if ($e instanceof QueryException || $e instanceof PDOException) {
+            return new SpecFailure(SpecFailureCategory::Database, $e::class, $message);
+        }
+
+        if ($e instanceof RequestException) {
+            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, $message, $e->response->status());
+        }
+
+        if ($e instanceof ConnectionException) {
+            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, $message);
+        }
+
+        if ($e instanceof InvalidOpenApiSpecException) {
+            return new SpecFailure(SpecFailureCategory::InvalidSpec, $e::class, $message);
+        }
+
+        return new SpecFailure(SpecFailureCategory::Unknown, $e::class, $message);
     }
 
     /**
@@ -82,10 +134,11 @@ final class OpenApiSpecService
      */
     public function flushCache(bool $includeStale = false, ?int $actorId = null): void
     {
-        Cache::forget($this->cacheKey());
+        $cache = $this->cache();
+        $cache->forget($this->cacheKey());
 
         if ($includeStale) {
-            Cache::forget($this->staleKey());
+            $cache->forget($this->staleKey());
         }
 
         Log::info('OpenAPI spec cache flushed', [
@@ -130,8 +183,10 @@ final class OpenApiSpecService
             // OpenAPI document (B3). Otherwise fall through to the stale copy.
             $this->assertValidSpec($spec);
 
-            Cache::put($this->cacheKey(), $spec, Config::integer('openapi.cache_ttl', 3600));
-            Cache::forever($this->staleKey(), $spec);
+            // Persisting must NOT discard a spec we just fetched successfully: a
+            // cache-write failure (DB-backed cache unreachable, or the large
+            // serialized spec exceeding a packet/row limit) is logged and ignored.
+            $this->persistSpec($spec);
 
             /** @var array<string, mixed> $spec */
             return $spec;
@@ -146,13 +201,35 @@ final class OpenApiSpecService
             ]);
 
             // Stale-on-error: serve the last known-good copy if we have one.
-            $stale = Cache::get($this->staleKey());
+            $stale = $this->cache()->get($this->staleKey());
             if (is_array($stale)) {
                 /** @var array<string, mixed> $stale */
                 return $stale;
             }
 
             throw $e;
+        }
+    }
+
+    /**
+     * Writes the spec to the expiring cache + the never-expiring stale copy.
+     * A write failure is swallowed (logged, redacted) so a freshly-fetched spec
+     * is never discarded just because the cache backend is unavailable — the
+     * portal then re-fetches per request, which is far better than a hard error.
+     *
+     * @param  array<array-key, mixed>  $spec
+     */
+    private function persistSpec(array $spec): void
+    {
+        try {
+            $cache = $this->cache();
+            $cache->put($this->cacheKey(), $spec, Config::integer('openapi.cache_ttl', 3600));
+            $cache->forever($this->staleKey(), $spec);
+        } catch (Throwable $e) {
+            Log::warning('OpenAPI spec fetched but could not be cached', [
+                'exception' => $e::class,
+                'message' => $this->redactMessage($e->getMessage()),
+            ]);
         }
     }
 
@@ -2420,6 +2497,19 @@ final class OpenApiSpecService
     private function asArray(mixed $value): array
     {
         return is_array($value) ? $value : [];
+    }
+
+    /**
+     * The cache repository backing the spec copies. A dedicated store
+     * (openapi.cache_store) lets the large spec live off the app's default
+     * store — e.g. on `file` instead of a DB-backed default — without changing
+     * caching for the rest of the app. Null falls back to the default store.
+     */
+    private function cache(): Repository
+    {
+        $store = config('openapi.cache_store');
+
+        return Cache::store(is_string($store) && $store !== '' ? $store : null);
     }
 
     private function cacheKey(): string
