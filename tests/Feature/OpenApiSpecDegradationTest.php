@@ -90,6 +90,11 @@ it('categorizes a dropped database connection as Database', function () {
 
     expect($result->ok())->toBeFalse();
     expect($result->failureOrFail()->category)->toBe(SpecFailureCategory::Database);
+    // No DB host / SQL leaks into the user-facing message.
+    expect($result->failureOrFail()->message)
+        ->toBe('The database is temporarily unreachable.')
+        ->not->toContain('Lost connection')
+        ->not->toContain('select');
 });
 
 it('serves the stale copy on upstream failure', function () {
@@ -123,12 +128,16 @@ it('returns the freshly fetched spec even when caching it fails', function () {
     expect($result->specOrFail()['info']['title'])->toBe('Fresh');
 });
 
-it('redacts secrets from the failure message', function () {
+it('never surfaces secrets or infra detail in the failure message', function () {
     configureUpstream('http://127.0.0.1:1/openapi.json?token=SUPERSECRET');
     Http::fake(['http://127.0.0.1:1/*' => Http::response([], 500)]);
 
     $result = degradationService()->tryFetchRaw();
 
     expect($result->ok())->toBeFalse();
-    expect($result->failureOrFail()->message)->not->toContain('SUPERSECRET');
+    // Fixed, category-safe message — no token, no upstream host.
+    expect($result->failureOrFail()->message)
+        ->toBe('The upstream API request failed.')
+        ->not->toContain('SUPERSECRET')
+        ->not->toContain('127.0.0.1');
 });

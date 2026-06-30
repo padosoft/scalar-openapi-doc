@@ -98,31 +98,35 @@ final class OpenApiSpecService
     }
 
     /**
-     * Maps a spec-load failure to a category + redacted detail. The message is
-     * redacted (no upstream URL / DB host / token); the HTTP status is filled
-     * only for an upstream HTTP error.
+     * Maps a spec-load failure to a category + UI-safe detail.
+     *
+     * Security: the raw exception message is NEVER surfaced. A QueryException's
+     * message embeds the DB host + SQL, a ConnectionException's the upstream
+     * host:port, and an SSRF-guard message the rejected host — none of which
+     * redactMessage() (http(s)-URL only) strips. Since SpecFailure is shown to
+     * every authenticated user (docs page + grants form), the message is a fixed,
+     * category-specific sentence; the diagnostic signal is the category label,
+     * the HTTP status (upstream errors only) and the framework exception class.
      */
     private function categorizeFailure(Throwable $e): SpecFailure
     {
-        $message = $this->redactMessage($e->getMessage());
-
         if ($e instanceof QueryException || $e instanceof PDOException) {
-            return new SpecFailure(SpecFailureCategory::Database, $e::class, $message);
+            return new SpecFailure(SpecFailureCategory::Database, $e::class, 'The database is temporarily unreachable.');
         }
 
         if ($e instanceof RequestException) {
-            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, $message, $e->response->status());
+            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, 'The upstream API request failed.', $e->response->status());
         }
 
         if ($e instanceof ConnectionException) {
-            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, $message);
+            return new SpecFailure(SpecFailureCategory::ExternalApi, $e::class, 'The upstream API could not be reached.');
         }
 
         if ($e instanceof InvalidOpenApiSpecException) {
-            return new SpecFailure(SpecFailureCategory::InvalidSpec, $e::class, $message);
+            return new SpecFailure(SpecFailureCategory::InvalidSpec, $e::class, 'The upstream returned an invalid OpenAPI document.');
         }
 
-        return new SpecFailure(SpecFailureCategory::Unknown, $e::class, $message);
+        return new SpecFailure(SpecFailureCategory::Unknown, $e::class, 'An unexpected error occurred while loading the documentation.');
     }
 
     /**
