@@ -34,10 +34,9 @@ type OpenApiFailure = {
     message: string;
 };
 
-type OpenApiStatus = {
-    ok: boolean;
-    failure?: OpenApiFailure;
-};
+// Discriminated union: `failure` is guaranteed present exactly when `ok` is
+// false, so the banner can read it without an extra optional check.
+type OpenApiStatus = { ok: true } | { ok: false; failure: OpenApiFailure };
 
 type UserFormProps = {
     user: UserPayload | null;
@@ -51,8 +50,7 @@ export default function UserForm() {
     const { user, roles, openapi, openapiStatus, servers } =
         usePage<UserFormProps>().props;
     const isEdit = user !== null;
-    const openapiFailure =
-        openapiStatus.ok === false ? openapiStatus.failure : undefined;
+    const openapiFailure = openapiStatus.ok ? undefined : openapiStatus.failure;
 
     const endpointOptions = useMemo(
         () =>
@@ -182,10 +180,10 @@ export default function UserForm() {
                         <AlertDescription>
                             <p>
                                 Tag and endpoint options couldn&rsquo;t be
-                                loaded, so only this user&rsquo;s existing
-                                grants are shown. You can still edit the other
-                                fields and save &mdash; grants are re-validated
-                                on the server.
+                                loaded, so those pickers may be empty or limited
+                                to grants already assigned. You can still edit
+                                the other fields and save &mdash; grants are
+                                re-validated on the server.
                             </p>
                             <p className="text-xs">
                                 Reason: {openapiFailure.label}
