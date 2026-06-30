@@ -230,9 +230,11 @@ final class OpenApiSpecService
             $cache->put($this->cacheKey(), $spec, Config::integer('openapi.cache_ttl', 3600));
             $cache->forever($this->staleKey(), $spec);
         } catch (Throwable $e) {
+            // Class only: a cache-write QueryException embeds the DB host, SQL and
+            // even serialized spec content, none of which redactMessage() strips —
+            // so the raw message is never written to the logs.
             Log::warning('OpenAPI spec fetched but could not be cached', [
                 'exception' => $e::class,
-                'message' => $this->redactMessage($e->getMessage()),
             ]);
         }
     }
