@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\UserAllowedEndpoint;
 use App\Models\UserAllowedTag;
 use App\Services\OpenApiSpecService;
+use App\Support\OpenApi\SpecFailure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -19,6 +20,21 @@ final class OpenApiDocsController extends Controller
     public function show(Request $request, OpenApiSpecService $service): JsonResponse
     {
         $user = $this->resolveUser($request);
+
+        // Degrade gracefully: when the spec can't be loaded (DB/cache down,
+        // upstream unreachable, invalid payload) return a VALID minimal document
+        // whose description carries the redacted reason, with HTTP 200 so Scalar
+        // renders it instead of showing its own generic fetch error.
+        $result = $service->tryFetchRaw();
+        if (! $result->ok()) {
+            return response()->json(
+                $this->unavailableDocument($result->failureOrFail()),
+                Response::HTTP_OK,
+                ['Cache-Control' => 'private,no-store'],
+            );
+        }
+
+        $rawSpec = $result->specOrFail();
 
         $isAdmin = $this->isAdmin($user);
         $grantedTags = $user->allowedTags
@@ -33,7 +49,7 @@ final class OpenApiDocsController extends Controller
         /** @var Collection<int, string> $grantedTags */
         /** @var Collection<int, string> $grantedEndpoints */
         $spec = $service->filterForUser(
-            $service->fetchRaw(),
+            $rawSpec,
             $grantedTags,
             $grantedEndpoints,
             $isAdmin,
@@ -71,16 +87,53 @@ final class OpenApiDocsController extends Controller
 
     public function metaTags(OpenApiSpecService $service): JsonResponse
     {
-        $tags = $service->extractTags($service->fetchRaw());
+        $result = $service->tryFetchRaw();
+        $tags = $result->ok() ? $service->extractTags($result->specOrFail()) : [];
 
         return response()->json($tags);
     }
 
     public function metaEndpoints(OpenApiSpecService $service): JsonResponse
     {
-        $endpoints = $service->extractEndpoints($service->fetchRaw());
+        $result = $service->tryFetchRaw();
+        $endpoints = $result->ok() ? $service->extractEndpoints($result->specOrFail()) : [];
 
         return response()->json($endpoints);
+    }
+
+    /**
+     * A valid minimal OpenAPI 3.1 document carrying the redacted failure reason
+     * in its description, so the Scalar UI renders a clear "unavailable" page
+     * (and shows what the load returned) instead of breaking.
+     *
+     * Deliberate product decision: the technical detail (failure category, HTTP
+     * status, exception class, redacted message) is shown to ALL authenticated
+     * users, not just admins — this is an authenticated-only portal and the
+     * message is already redacted of hosts/URLs/tokens by OpenApiSpecService, so
+     * only a low-sensitivity PHP class name is exposed.
+     *
+     * @return array<string, mixed>
+     */
+    private function unavailableDocument(SpecFailure $failure): array
+    {
+        $reason = $failure->label();
+        if ($failure->httpStatus !== null) {
+            $reason .= ' (HTTP '.$failure->httpStatus.')';
+        }
+
+        $description = "The API documentation could not be loaded right now. Please try again shortly.\n\n"
+            ."**Reason:** {$reason}\n\n"
+            ."**Technical detail:** `{$failure->exceptionClass}` — {$failure->message}";
+
+        return [
+            'openapi' => '3.1.0',
+            'info' => [
+                'title' => '⚠️ API documentation temporarily unavailable',
+                'version' => '0',
+                'description' => $description,
+            ],
+            'paths' => (object) [],
+        ];
     }
 
     public function flushCache(OpenApiSpecService $service): JsonResponse

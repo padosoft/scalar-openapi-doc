@@ -57,7 +57,12 @@ return [
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', (string) env('LOG_STACK', 'single')),
-            'ignore_exceptions' => false,
+            // A failing log handler (e.g. a dead remote socket on Laravel Cloud,
+            // "Could not write to socket") must NEVER bubble out of a Log call and
+            // crash an otherwise-handled request. Laravel wraps the stack in
+            // Monolog's WhatFailureGroupHandler when this is true, swallowing
+            // handler write failures while keeping the rest of the request alive.
+            'ignore_exceptions' => true,
         ],
 
         'single' => [
