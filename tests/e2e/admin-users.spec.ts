@@ -37,10 +37,12 @@ test('Admin users index and create form are usable from UI', async ({
     await page.goto('/admin/users/create');
     await expect(page).toHaveURL('/admin/users/create');
 
-    // This flow must succeed whether or not the OpenAPI catalog is available:
-    // when it isn't, the form renders in degraded mode (warning banner) but the
-    // base fields below are still fully usable. The banner's two states are
-    // unit-tested in resources/js/pages/admin/users/__tests__/form.test.tsx.
+    // This flow must succeed whether or not the OpenAPI catalog is available.
+    // Banner presence is environment-dependent (it shows only when the catalog
+    // can't be loaded), so it is deliberately NOT asserted here — its two states
+    // are unit-tested in
+    // resources/js/pages/admin/users/__tests__/form.test.tsx. What this e2e
+    // guarantees is that the base fields stay usable in either mode.
     const email = `playwright-ui-${Date.now()}@example.com`;
     await page.getByLabel('Name').fill('Playwright User');
     await page.getByLabel('Email').fill(email);

@@ -1,11 +1,12 @@
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 // Mutable page props the mocked usePage() returns; set per test before render.
 const state = vi.hoisted(() => ({ props: {} as Record<string, unknown> }));
 
 vi.mock('@inertiajs/react', () => ({
-    Head: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    Head: ({ children }: { children?: ReactNode }) => <>{children}</>,
     router: { visit: vi.fn() },
     useForm: () => ({
         data: {
