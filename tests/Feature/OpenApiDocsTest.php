@@ -222,6 +222,9 @@ class OpenApiDocsTest extends TestCase
     {
         $this->seed(DatabaseSeeder::class);
         config([
+            // Pin the spec cache to the default store the Cache facade clears below;
+            // an env-set OPENAPI_CACHE_STORE would otherwise divert the service.
+            'openapi.cache_store' => null,
             'openapi.cache_key' => 'docs-unavailable-raw',
             'openapi.stale_key' => 'docs-unavailable-stale',
             'openapi.upstream_url' => 'http://127.0.0.1:1/openapi.json',

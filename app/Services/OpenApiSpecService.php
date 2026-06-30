@@ -102,8 +102,8 @@ final class OpenApiSpecService
      *
      * Security: the raw exception message is NEVER surfaced. A QueryException's
      * message embeds the DB host + SQL, a ConnectionException's the upstream
-     * host:port, and an SSRF-guard message the rejected host — none of which
-     * redactMessage() (http(s)-URL only) strips. Since SpecFailure is shown to
+     * host:port, and an SSRF-guard message the rejected host — none of which a
+     * URL-only redactor would strip. Since SpecFailure is shown to
      * every authenticated user (docs page + grants form), the message is a fixed,
      * category-specific sentence; the diagnostic signal is the category label,
      * the HTTP status (upstream errors only) and the framework exception class.
@@ -195,13 +195,14 @@ final class OpenApiSpecService
             /** @var array<string, mixed> $spec */
             return $spec;
         } catch (Throwable $e) {
-            // Redact: the upstream URL may carry userinfo/signed query params, and
-            // the HTTP client's exception message embeds the full request URI —
-            // never write those secrets to the logs.
+            // Safe fields only: the upstream URL is redacted (it may carry
+            // userinfo/signed query params), and the raw exception message is
+            // omitted entirely. A ConnectionException/cURL failure embeds host:port
+            // (no scheme) and other infra detail that a URL-only redactor would not
+            // strip, so logging the message would leak it.
             Log::error('OpenAPI upstream spec fetch failed', [
                 'url' => $this->redactUrl($url),
                 'exception' => $e::class,
-                'message' => $this->redactMessage($e->getMessage()),
             ]);
 
             // Stale-on-error: serve the last known-good copy if we have one.
@@ -231,8 +232,8 @@ final class OpenApiSpecService
             $cache->forever($this->staleKey(), $spec);
         } catch (Throwable $e) {
             // Class only: a cache-write QueryException embeds the DB host, SQL and
-            // even serialized spec content, none of which redactMessage() strips —
-            // so the raw message is never written to the logs.
+            // even serialized spec content, none of which a URL-only redactor would
+            // strip — so the raw message is never written to the logs.
             Log::warning('OpenAPI spec fetched but could not be cached', [
                 'exception' => $e::class,
             ]);
@@ -2340,23 +2341,6 @@ final class OpenApiSpecService
         $path = is_string($parts['path'] ?? null) ? $parts['path'] : '';
 
         return strtolower((string) $parts['scheme']).'://'.$parts['host'].$port.$path;
-    }
-
-    /**
-     * Strips userinfo and query/fragment from any http(s) URL embedded in a
-     * string (e.g. an HTTP client's exception message), so secrets in the
-     * upstream URI never reach the logs.
-     */
-    private function redactMessage(string $message): string
-    {
-        // Userinfo group is greedy up to the LAST '@' before the path delimiter,
-        // so a password that itself contains '@' (e.g. user:p@ss@host, which PHP
-        // accepts) is fully stripped, not just up to the first '@'.
-        return (string) preg_replace(
-            '~(https?://)(?:[^/\s?#]*@)?([^/\s?#]+)([^\s?#]*)[^\s]*~i',
-            '$1$2$3',
-            $message
-        );
     }
 
     /**

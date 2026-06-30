@@ -36,6 +36,11 @@ function configureUpstream(string $url): void
     Cache::forget('degradation-test-stale');
 }
 
+// Pin the spec cache to the default store: these tests clear/seed keys via the
+// Cache facade, so an env-set OPENAPI_CACHE_STORE must not divert the service to
+// a different backend and leave the assertions reading the wrong store.
+beforeEach(fn () => config(['openapi.cache_store' => null]));
+
 it('returns a successful result from cache', function () {
     config(['openapi.cache_key' => 'degradation-ok-raw']);
     Cache::put('degradation-ok-raw', ['openapi' => '3.1.0', 'info' => ['title' => 'A', 'version' => '1'], 'paths' => []], 3600);

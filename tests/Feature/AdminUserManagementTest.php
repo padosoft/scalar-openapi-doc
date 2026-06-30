@@ -314,6 +314,9 @@ class AdminUserManagementTest extends TestCase
 
         $cacheKey = 'admin-users-openapi-edit-unavailable';
         config([
+            // Pin the spec cache to the default store the Cache facade clears below;
+            // an env-set OPENAPI_CACHE_STORE would otherwise divert the service.
+            'openapi.cache_store' => null,
             'openapi.cache_key' => $cacheKey,
             'openapi.stale_key' => "{$cacheKey}-stale",
             'openapi.upstream_url' => 'http://127.0.0.1:1/openapi.json',
